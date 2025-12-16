@@ -1,4 +1,4 @@
-# Código de execução
+# Comando de execução
 
 ## Execução simples
 
