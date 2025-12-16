@@ -1,0 +1,12 @@
+2025-12-11 18:46:03 [contract090]: Analysing contract in .\08\contract090.rcl
+2025-12-11 18:46:03 [contract090]: Loaded Contract: 
+  {i4,i5}[a3]({i7,i1}[a6]({i6,i3}PROHIBITION(a5)_/F/_)) AND {i2}[a2]({i7}PROHIBITION(a1)_/F/_) AND {i4,i3}[a10]({i6,i1}PROHIBITION(a4)_/F/_) AND {i5,i2}[a9]({i2}[a7]({i5,i4}OBLIGATION(a8)_/F/_)) AND {i7,i6}PERMISSION(a9) AND {i3,i1}[a6]({i5,i2}PERMISSION(a4)) AND {i6}[a1]({i7}[a5]({i4,i1}OBLIGATION(a2)_/F/_)) AND {i3}PROHIBITION(a3)_/F/_ AND {i6,i4}[a8]({i1,i5}[a7]({i7,i2}OBLIGATION(a10)_/F/_))
+Conflicts:
+	Global: []
+	Relativized: []
+
+2025-12-11 18:46:03 [contract090]: Processing contract...
+2025-12-11 18:47:01 [contract090]: Completed in 58090ms
+[CONFLICT-FREE] The analyzed contract is conflict-free.
+
+2025-12-11 18:47:01 [contract090]: Analysis completed successfully

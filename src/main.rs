@@ -1,0 +1,398 @@
+mod model;
+mod algorithms;
+mod utils;
+pub mod parser;
+
+use model::contracts::*;
+use model::automata::*;
+use model::actions::*;
+use algorithms::clause_decomposer::*;
+use algorithms::conflict_searcher::*;
+use algorithms::action_extractor::*;
+use algorithms::automata_constructor::*;
+use utils::*;
+use console_util::ConsoleColors;
+use pest::Parser;
+
+use parser::{
+    RCLParser,
+    Rule,
+    build_ast
+};
+
+use std::time::Instant;
+use std::path::Path;
+use std::fs;
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let config = parse_command_line(&args);
+    
+    let mut logger = match Logger::new(config.clone()) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Failed to initialize logger: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    logger.log(LogType::Additional, &format!("Using {:?}", config));
+    logger.log(
+        LogType::Minimal,
+        &format!("Analysing contract in {}", config.contract_file_name()),
+    );
+
+    match run_analysis(config, &mut logger) {
+        Ok(_) => {
+            logger.log(LogType::Minimal, "Analysis completed successfully");
+        }
+        Err(e) => {
+            logger.log(LogType::Minimal, "A fatal error occurred");
+            logger.log(LogType::Necessary, &format!("Error: {:?}", e));
+            
+            if e.to_string().contains("parse") || e.to_string().contains("syntax") {
+                logger.log(
+                    LogType::Minimal,
+                    "Malformed Contract, please check the syntax.",
+                );
+            }
+        }
+    }
+}
+
+fn run_analysis(
+    config: RunConfiguration,
+    logger: &mut Logger,
+) -> Result<(), Box<dyn std::error::Error>> {
+
+    let input_string = fs::read_to_string(config.contract_file_name())
+        .map_err(|e| format!("Erro ao ler o ficheiro: {}", e))?;
+
+    let mut pairs = RCLParser::parse(Rule::main, &input_string)
+        .map_err(|e| format!("Erro de sintaxe: \n{}", e))?;
+
+    let main_pair = pairs.next().unwrap();
+    
+    // Carrega o contrato
+    let contract: Contract = build_ast(main_pair)
+        .map_err(|e| format!("Erro ao construir AST: \n{}", e))?;
+
+    logger.log(LogType::Necessary, &format!("Loaded Contract: {}", contract));
+    
+    // Log da tabela de símbolos
+    let symbol_table = SymbolTable::instance();
+    let table = symbol_table.lock().unwrap();
+
+    logger.log(LogType::Additional, &format!("{}", *table));
+    drop(table);
+
+    logger.log(LogType::Minimal, "Processing contract...");
+
+    // Processa o contrato
+    let start = Instant::now();
+    let mut constructor = AutomataConstructor::new(config.clone());
+    let automaton = constructor.process(contract, logger);
+    let elapsed = start.elapsed();
+
+    // Imprime resultado
+    let result = print_result(&automaton, elapsed.as_millis() as u64);
+    logger.log(LogType::Necessary, &result);
+
+    // Exporta decomposições
+    if config.is_export_decompositions() {
+        logger.log(
+            LogType::Minimal,
+            &format!(
+                "Exporting Decompositions to {}",
+                config.decompositions_file_name()
+            ),
+        );
+        let states_dump = AutomatonExporter::dump_states(&automaton);
+        FileUtil::write_to_file(config.decompositions_file_name(), &[&states_dump])?;
+    }
+
+    // Exporta autômato
+    if config.is_export_automaton() {
+        logger.log(
+            LogType::Minimal,
+            &format!("Exporting Automaton to {}", config.automaton_file_name()),
+        );
+
+        // Exporta versão minimizada se configurado
+        if config.is_export_min_automaton() {
+            let min_dot = AutomatonExporter::dump_to_min_dot(&automaton);
+            let min_filename = format!("{}_min", config.automaton_file_name());
+            FileUtil::write_to_file(&min_filename, &[&min_dot])?;
+        }
+
+        // Exporta versão completa
+        let dot = AutomatonExporter::dump_to_dot(&automaton);
+        FileUtil::write_to_file(config.automaton_file_name(), &[&dot])?;
+
+        // Exporta versão texto
+        let text = AutomatonExporter::dump_to_text(&automaton);
+        let text_filename = format!("{}.txt", config.automaton_file_name());
+        FileUtil::write_to_file(&text_filename, &[&text])?;
+    }
+
+    std::thread::spawn(move || {
+        drop(automaton);
+    });
+
+    Ok(())
+}
+
+/// Imprime o trace de conflitos encontrados
+fn print_trace(automaton: &Automaton) -> String {
+    let mut output = String::new();
+    output.push_str("\n-------------------------------------------------------\n");
+
+    let conflicts = automaton.get_conflicts();
+    
+    for state in conflicts {
+        output.push_str(&format!("Conflict found in state (s{})\n", state.id));
+        
+        if let Some(ref conflict_info) = state.conflict_information {
+            output.push_str(&format!("Conflict: {}\n", conflict_info));
+        }
+        
+        output.push_str("-------------------------------------------------------\n");
+        
+        let mut trace_summary = String::from("Trace: ");
+        let mut trace_details = String::from("Stacktrace: \n");
+        
+        // Reconstrói o trace seguindo as transições
+        let mut current_state = state.clone();
+        
+        while !current_state.trace.is_empty() {
+            if let Some(&transition_id) = current_state.trace.first() {
+                if let Some(transition) = automaton.get_transition_by_id(transition_id) {
+                    trace_summary.push_str(&format!("(s{})", transition.to));
+                    
+                    trace_details.push_str(&format!(
+                        "{}(s{}){}",
+                        ConsoleColors::FG_YELLOW,
+                        transition.to,
+                        ConsoleColors::RESET
+                    ));
+                    
+                    if let Some(to_state) = automaton.get_state_by_id(transition.to) {
+                        trace_details.push_str(&format!(" - {}\n", to_state));
+                    }
+                    
+                    trace_details.push_str(&format!(
+                        "{}<T{}> - {}[{}]{}\n",
+                        ConsoleColors::FG_RED,
+                        transition.id,
+                        ConsoleColors::FG_BLUE,
+                        transition.actions.iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                        ConsoleColors::RESET
+                    ));
+                    
+                    trace_summary.push_str(&format!("<--T{}--", transition.id));
+                    
+                    // Vai para o próximo estado no trace
+                    if let Some(from_state) = automaton.get_state_by_id(transition.from) {
+                        current_state = from_state.clone();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        // Adiciona estado final
+        trace_summary.push_str(&format!("(s{})\n", current_state.id));
+        trace_details.push_str(&format!(
+            "{}(s{}){}",
+            ConsoleColors::FG_YELLOW,
+            current_state.id,
+            ConsoleColors::RESET
+        ));
+        
+        if let Some(ref clause) = current_state.clause {
+            trace_details.push_str(&format!(" - {}\n", clause));
+        }
+        
+        output.push_str(&trace_summary);
+        output.push_str("-------------------------------------------------------\n");
+        output.push_str(&trace_details);
+        output.push_str("-------------------------------------------------------\n");
+    }
+
+    output
+}
+
+/// Imprime o resultado da análise
+fn print_result(automaton: &Automaton, ms: u64) -> String {
+    let mut output = String::new();
+    
+    output.push_str(&format!("Completed in {}ms\n", ms));
+    
+    if automaton.conflict_found {
+        output.push_str(&format!(
+            "{}[CONFLICT] {}A conflict was found in the analyzed contract.{}\n",
+            ConsoleColors::FG_RED,
+            ConsoleColors::FG_WHITE,
+            ConsoleColors::RESET
+        ));
+        output.push_str(&print_trace(automaton));
+    } else {
+        output.push_str(&format!(
+            "{}[CONFLICT-FREE] {}The analyzed contract is conflict-free.{}\n",
+            ConsoleColors::FG_GREEN,
+            ConsoleColors::FG_WHITE,
+            ConsoleColors::RESET
+        ));
+    }
+    
+    output
+}
+
+/// Parse simples de argumentos de linha de comando
+fn parse_command_line(args: &[String]) -> RunConfiguration {
+    if args.len() < 2 {
+        print_usage();
+        std::process::exit(0);
+    }
+
+    let mut config = RunConfiguration::new();
+    
+    // Primeiro argumento é o arquivo do contrato
+    config.set_contract_file_name(args[1].clone());
+    let file_stem = Path::new(&args[1])
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("contract");
+    
+    config.set_result_file_name(format!("{}.result", file_stem));
+    config.set_global_log_filename(format!("{}.log", file_stem));
+    config.set_automaton_file_name(format!("{}.dot", file_stem));
+    config.set_decompositions_file_name(format!("{}.csv", file_stem));
+    
+    let mut i = 2;
+    while i < args.len() {
+        let arg = &args[i];
+
+        // Flags curtas combinadas: -vgm
+        if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2 {
+            for ch in arg.chars().skip(1) {
+                match ch {
+                    'h' => {
+                        print_usage();
+                        std::process::exit(0);
+                    }
+                    'v' => {
+                        config.set_log_level(LogLevel::Verbose);
+                    }
+                    'g' => {
+                        config.set_export_automaton(true);
+                        config.set_export_decompositions(true);
+                    }
+                    'n' => {
+                        config.set_use_prunning(false);
+                    }
+                    'c' => {
+                        config.set_continue_on_conflict(true);
+                    }
+                    'm' => {
+                        config.set_export_min_automaton(true);
+                    }
+                    // 't' => {
+                    //     config.set_test(true);
+                    // }
+                    _ => {
+                        eprintln!("Unknown option: -{}", ch);
+                        print_usage();
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            i += 1;
+            continue;
+        }
+
+        // Flags normais (-v, -g)
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            "-v" | "--verbose" => {
+                config.set_log_level(LogLevel::Verbose);
+            }
+            "-g" => {
+                config.set_export_automaton(true);
+                config.set_export_decompositions(true);
+            }
+            "-n" | "--no-prunning" => {
+                config.set_use_prunning(false);
+            }
+            "-c" | "--continue" => {
+                config.set_continue_on_conflict(true);
+            }
+            "-m" => {
+                config.set_export_min_automaton(true);
+            }
+            // "-t" => {
+            //     config.set_test(true);
+            // }
+            _ => {
+                eprintln!("Unknown option: {}", arg);
+                print_usage();
+                std::process::exit(1);
+            }
+        }
+
+        i += 1;
+    }
+    
+    config
+}
+
+/// Imprime informações de uso
+fn print_usage() {
+    println!("recall - RelativizEd ContrAct Language anaLyser (v1.0)\n");
+    println!("USAGE:");
+    println!("    recall <CONTRACT_FILE> [OPTIONS]\n");
+    println!("OPTIONS:");
+    println!("    -h, --help          Print this message and exit");
+    println!("    -v, --verbose       Turn on the verbose mode");
+    println!("    -g                  Exports the automaton into a graphviz file");
+    println!("                        Default filename is <CONTRACT_FILE>.dot");
+    println!("    -n, --no-prunning   Don't use the prunning method");
+    println!("    -c, --continue      Continues the analysis if a conflict is found");
+    println!("    -m                  Export minimized automaton");
+    //println!("    -t                  Test mode (outputs CSV metrics)\n");
+    println!("EXAMPLES:");
+    println!("    recall contract.rcl");
+    println!("        Analyzes a contract in the file 'contract.rcl'");
+    println!("    recall contract.rcl -g");
+    println!("        Analyzes the contract and writes automaton in a file\n");
+    println!("Please report issues to: della.mura@gmail.com");
+    println!("More information: http://recall.della-mura.com.br");
+}
+
+// ==================== Módulo de Utilidades de Console ====================
+
+mod console_util {
+    pub struct ConsoleColors;
+
+    impl ConsoleColors {
+        pub const RESET: &'static str = "\u{001B}[0m";
+
+        pub const FG_RED: &'static str = "\u{001B}[31m";
+        pub const FG_GREEN: &'static str = "\u{001B}[32m";
+        pub const FG_YELLOW: &'static str = "\u{001B}[33m";
+        pub const FG_BLUE: &'static str = "\u{001B}[34m";
+        pub const FG_WHITE: &'static str = "\u{001B}[37m";
+    }
+}

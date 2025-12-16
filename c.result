@@ -1,0 +1,27 @@
+2025-12-11 17:17:31: Using RunConfiguration { contract_file_name: "c.rcl", result_file_name: "c.result", export_decompositions: true, export_automaton: true, continue_on_conflict: false, export_min_automaton: false, use_prunning: true, decompositions_file_name: "c.csv", automaton_file_name: "c.dot", log_level: Verbose, global_log_filename: "debug.log", test: false }
+2025-12-11 17:17:31: Analysing contract in c.rcl
+2025-12-11 17:17:31: Loaded Contract: 
+  {neo,morpheus}[redPill]({morpheus,neo}OBLIGATION(showTrue)_/F/_ AND {morpheus,neo}[showTrue]({neo}OBLIGATION(saveWorld)_/{smith}OBLIGATION(destroyMatrix)_/F/_/_))
+  {neo,morpheus}[bluePill]({morpheus,neo}OBLIGATION((hideTrue & forget))_/F/_ AND {morpheus,neo}[hideTrue]([1*]({neo}OBLIGATION(liveInIgnorance)_/F/_) AND {smith}OBLIGATION(destroyMatrix)_/F/_))
+Conflicts:
+	Global: [(showTrue,hideTrue: GLOBAL), (redPill,bluePill: GLOBAL)]
+	Relativized: []
+
+2025-12-11 17:17:31: Table of Symbols
+(1)      action  showTrue
+(2)      action  hideTrue
+(3)      action  redPill
+(4)      action  bluePill
+(5)  individual  neo
+(6)  individual  morpheus
+(7)      action  saveWorld
+(8)  individual  smith
+(9)      action  destroyMatrix
+(10)      action  forget
+(11)      action  liveInIgnorance
+
+2025-12-11 17:17:31: Processing contract...
+2025-12-11 17:17:31: Completed in 2ms
+[CONFLICT-FREE] The analyzed contract is conflict-free.
+
+2025-12-11 17:17:31: Analysis completed successfully

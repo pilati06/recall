@@ -1,0 +1,32 @@
+2025-12-11 18:45:41: Using RunConfiguration { contract_file_name: ".\\contract020.rcl", result_file_name: "contract020.result", export_decompositions: false, export_automaton: false, continue_on_conflict: false, export_min_automaton: false, use_prunning: true, decompositions_file_name: "contract020.csv", automaton_file_name: "contract020.dot", log_level: Normal, global_log_filename: "contract020.log", test: false }
+2025-12-11 18:45:41: Analysing contract in .\contract020.rcl
+2025-12-11 18:45:41: Loaded Contract: 
+  {i5,i2}PERMISSION(a10) AND {i6}PROHIBITION(a3)_/F/_ AND {i4,i7}PERMISSION(a7) AND {i3,i1}OBLIGATION(a2)_/F/_ AND {i1,i7}PERMISSION(a9) AND {i3}PROHIBITION(a5)_/F/_ AND {i2,i6}[!a1]({i5,i4}OBLIGATION(a4)_/F/_) AND {i1,i3}[a6]({i6,i7}[a8]({i2,i5}[a1]({i4}PERMISSION(a9)))) AND {i6,i4}PERMISSION(a6) AND {i3,i5}[a10]({i2}[a5]({i7,i1}OBLIGATION(a2)_/F/_)) AND {i3,i4}[a7]({i6,i7}PERMISSION(a3))
+Conflicts:
+	Global: []
+	Relativized: []
+
+2025-12-11 18:45:41: Table of Symbols
+(1)  individual  i5
+(2)  individual  i2
+(3)      action  a10
+(4)  individual  i6
+(5)      action  a3
+(6)  individual  i4
+(7)  individual  i7
+(8)      action  a7
+(9)  individual  i3
+(10)  individual  i1
+(11)      action  a2
+(12)      action  a9
+(13)      action  a5
+(14)      action  a1
+(15)      action  a4
+(16)      action  a6
+(17)      action  a8
+
+2025-12-11 18:45:41: Processing contract...
+2025-12-11 18:45:44: Completed in 3000ms
+[CONFLICT-FREE] The analyzed contract is conflict-free.
+
+2025-12-11 18:45:44: Analysis completed successfully
