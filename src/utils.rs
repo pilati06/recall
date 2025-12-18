@@ -444,10 +444,6 @@ impl ContractUtil {
         let src: Vec<Arc<RelativizedAction>> = relativized_actions.into_iter().collect();
         let n = src.len();
 
-        if n > 32 {
-            panic!("Otimização atual suporta no máximo 32 ações relativizadas. Input: {}", n);
-        }
-
         let size: u64 = 1 << n; // 2^n
 
         let mut valid_masks: Vec<u32> = (0..size)
