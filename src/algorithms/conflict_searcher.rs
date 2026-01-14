@@ -330,6 +330,13 @@ impl ConflictSearcher {
                 
                 // GLOBAL
                 tags.insert(DeonticTag::global(deontic_type, tag.action.clone()));
+
+                // RELATIVIZED
+                tags.insert(DeonticTag::relativized(
+                    deontic_type,
+                    tag.action.clone(),
+                    i,
+                ));
                 
                 // DIRECTED (mantém sender e receiver)
                 tags.insert(DeonticTag::directed(

@@ -226,6 +226,22 @@ impl Clause {
     }
 
     // Métodos auxiliares
+    pub fn get_receiver(&self) -> &i32 {
+        match self {
+            Clause::Deontic { receiver, .. } => receiver,
+            Clause::Dynamic { receiver, .. } => receiver,
+            Clause::Boolean { .. } => &0,
+        }
+    }
+
+    pub fn get_sender(&self) -> &i32 {
+        match self {
+            Clause::Deontic { sender, .. } => sender,
+            Clause::Dynamic { sender, .. } => sender,
+            Clause::Boolean { .. } => &0,
+        }
+    }
+
     pub fn set_composition(&mut self, composition: ClauseComposition) {
         match self {
             Clause::Boolean { composition: c, .. } => *c = Some(composition),

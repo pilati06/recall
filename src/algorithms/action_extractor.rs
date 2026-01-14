@@ -8,7 +8,6 @@ use crate::{
 
 /// Extrator de ações que calcula ações relativizadas e concorrentes
 pub struct ActionExtractor {
-    individuals: FxHashSet<i32>,
     conflicts: Vec<Conflict>,
 }
 
@@ -18,9 +17,8 @@ impl ActionExtractor {
     /// # Argumentos
     /// * `individuals` - Conjunto de indivíduos do contrato
     /// * `conflicts` - Lista de conflitos predefinidos
-    pub fn new(individuals: FxHashSet<i32>, conflicts: Vec<Conflict>) -> Self {
+    pub fn new(conflicts: Vec<Conflict>) -> Self {
         ActionExtractor {
-            individuals,
             conflicts,
         }
     }
@@ -35,12 +33,13 @@ impl ActionExtractor {
     pub fn calculate_concurrent_relativized_actions(
         &mut self,
         clause: &Clause,
+        indiv: &FxHashSet<i32>,
         config: &RunConfiguration,
         logger: &mut Logger
     ) -> CompressedConcurrentActions {
         let processed = ClauseDecomposer::process_composed_actions(clause);
         
-        let actions = self.calculate_relativized_actions(&processed);
+        let actions = self.calculate_relativized_actions(&processed, indiv);
         
         if config.log_level() == LogLevel::Verbose {
             logger.log(LogType::Necessary, &format!(
@@ -79,7 +78,7 @@ impl ActionExtractor {
     /// 
     /// # Retorna
     /// Conjunto de ações relativizadas extraídas da cláusula
-    pub fn calculate_relativized_actions(&self, clause: &Clause) -> FxHashSet<Arc<RelativizedAction>> {
+    pub fn calculate_relativized_actions(&self, clause: &Clause, indiv: &FxHashSet<i32>) -> FxHashSet<Arc<RelativizedAction>> {
         let mut actions = FxHashSet::default();
         
         if let Clause::Boolean { .. } = clause {
@@ -99,9 +98,9 @@ impl ActionExtractor {
                     }
                     
                     RelativizationType::Relativized => {
-                        let ignore_self = self.individuals.len() > 1;
+                        let ignore_self = indiv.len() > 1;
                         
-                        for &j in &self.individuals {
+                        for &j in indiv {
                             if !(ignore_self && sender == &j) {
                                 for ba in &basic_actions {
                                     actions.insert(Arc::new(RelativizedAction::new(*sender, ba.clone(), j)));
@@ -111,10 +110,10 @@ impl ActionExtractor {
                     }
                     
                     RelativizationType::Global => {
-                        let ignore_self = self.individuals.len() > 1;
+                        let ignore_self = indiv.len() > 1;
                         
-                        for &i in &self.individuals {
-                            for &j in &self.individuals {
+                        for &i in indiv {
+                            for &j in indiv {
                                 if !(ignore_self && i == j) {
                                     for ba in &basic_actions {
                                         actions.insert(Arc::new(RelativizedAction::new(i, ba.clone(), j)));
@@ -132,10 +131,42 @@ impl ActionExtractor {
         }
         
         if let Some(composition) = clause.get_composition() {
-            let other_actions = self.calculate_relativized_actions(&composition.other);
+            let other_actions = self.calculate_relativized_actions(&composition.other, indiv);
             actions.extend(other_actions);
         }
         
         actions
+    }
+
+    pub fn calculate_individuals(clause: &Clause, all_individuals: FxHashSet<i32>) -> FxHashSet<i32> {
+        let mut i = Self::extract_individuals(clause);
+
+        if i.is_empty() {
+            if let Some(first) = all_individuals.iter().next() {
+                i.insert(*first);
+            }
+        }
+
+        i
+    }
+
+    fn extract_individuals(clause: &Clause) -> FxHashSet<i32> {
+        let mut i = FxHashSet::default();
+        let receiver = clause.get_receiver().clone();
+        let sender = clause.get_sender().clone();
+
+        if receiver > 0 {
+            i.insert(receiver);
+        }
+
+        if sender > 0 {
+            i.insert(sender);
+        }
+
+        if let Some(composition) = clause.get_composition() {
+            i.extend(Self::extract_individuals(&composition.other));
+        }
+
+        i
     }
 }

@@ -217,7 +217,7 @@ impl RunConfiguration {
     pub fn is_export_automaton(&self) -> bool { self.export_automaton }
     pub fn is_continue_on_conflict(&self) -> bool { self.continue_on_conflict }
     pub fn is_export_min_automaton(&self) -> bool { self.export_min_automaton }
-    //pub fn is_use_prunning(&self) -> bool { self.use_prunning }
+    pub fn is_use_prunning(&self) -> bool { self.use_prunning }
     pub fn decompositions_file_name(&self) -> &str { &self.decompositions_file_name }
     pub fn automaton_file_name(&self) -> &str { &self.automaton_file_name }
     pub fn log_level(&self) -> LogLevel { self.log_level }

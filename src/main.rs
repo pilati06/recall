@@ -13,6 +13,7 @@ use algorithms::automata_constructor::*;
 use utils::*;
 use console_util::ConsoleColors;
 use pest::Parser;
+//use rayon::ThreadPoolBuilder;
 
 use parser::{
     RCLParser,
@@ -25,6 +26,11 @@ use std::path::Path;
 use std::fs;
 
 fn main() {
+    // ThreadPoolBuilder::new()
+    // .num_threads(5)
+    // .build_global()
+    // .unwrap();
+
     let args: Vec<String> = std::env::args().collect();
     let config = parse_command_line(&args);
     
