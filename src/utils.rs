@@ -436,7 +436,7 @@ impl ContractUtil {
     pub fn calculate_concurrent_relativized_actions(
         relativized_actions: FxHashSet<Arc<RelativizedAction>>,
         conflicts: &[Conflict],
-        config: &RunConfiguration,
+        _config: &RunConfiguration,
         logger: &mut Logger
     ) -> CompressedConcurrentActions {
         let current_time = std::time::Instant::now();
@@ -470,12 +470,9 @@ impl ContractUtil {
         
         valid_masks.sort_by(|a, b| b.count_ones().cmp(&a.count_ones()));
 
-        
-        if config.log_level() == LogLevel::Verbose {
-            let elapsed = current_time.elapsed();
-            logger.log(LogType::Necessary, &format!("Calculated {} concurrent actions in {:?}", 
-                    valid_masks.len(), elapsed));
-        }
+        let elapsed = current_time.elapsed();
+        logger.log(LogType::Necessary, &format!("Calculated {} concurrent actions in {:?}", 
+                valid_masks.len(), elapsed));
 
         CompressedConcurrentActions {
             source_map: src,

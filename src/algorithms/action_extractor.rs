@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     Clause, RelativizedAction, Conflict, RelativizationType, 
     ClauseDecomposer, ContractUtil, CompressedConcurrentActions, 
-    RunConfiguration, Logger, LogLevel, LogType
+    RunConfiguration, Logger, LogType
 };
 
 /// Extrator de ações que calcula ações relativizadas e concorrentes
@@ -41,15 +41,13 @@ impl ActionExtractor {
         
         let actions = self.calculate_relativized_actions(&processed, indiv);
         
-        if config.log_level() == LogLevel::Verbose {
-            logger.log(LogType::Necessary, &format!(
-                "Concurrent Relativized Actions for {} is [{}]",
-                processed, actions.iter()
-                            .map(|a| a.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-            ));
-        }
+        logger.log(LogType::Necessary, &format!(
+            "Concurrent Relativized Actions for {} is [{}]",
+            processed, actions.iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+        ));
         
         let mut compressed_result = ContractUtil::calculate_concurrent_relativized_actions(
             actions.clone(),
