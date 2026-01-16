@@ -148,7 +148,6 @@ fn run_analysis(
     Ok(())
 }
 
-/// Imprime o trace de conflitos encontrados
 fn print_trace(automaton: &Automaton) -> String {
     let mut output = String::new();
     output.push_str("\n-------------------------------------------------------\n");
@@ -167,7 +166,6 @@ fn print_trace(automaton: &Automaton) -> String {
         let mut trace_summary = String::from("Trace: ");
         let mut trace_details = String::from("Stacktrace: \n");
         
-        // Reconstrói o trace seguindo as transições
         let mut current_state = state.clone();
         
         while !current_state.trace.is_empty() {
@@ -200,7 +198,6 @@ fn print_trace(automaton: &Automaton) -> String {
                     
                     trace_summary.push_str(&format!("<--T{}--", transition.id));
                     
-                    // Vai para o próximo estado no trace
                     if let Some(from_state) = automaton.get_state_by_id(transition.from) {
                         current_state = from_state.clone();
                     } else {
@@ -214,7 +211,6 @@ fn print_trace(automaton: &Automaton) -> String {
             }
         }
         
-        // Adiciona estado final
         trace_summary.push_str(&format!("(s{})\n", current_state.id));
         trace_details.push_str(&format!(
             "{}(s{}){}",
@@ -236,7 +232,6 @@ fn print_trace(automaton: &Automaton) -> String {
     output
 }
 
-/// Imprime o resultado da análise
 fn print_result(automaton: &Automaton, ms: u64) -> String {
     let mut output = String::new();
     
@@ -262,7 +257,6 @@ fn print_result(automaton: &Automaton, ms: u64) -> String {
     output
 }
 
-/// Parse simples de argumentos de linha de comando
 fn parse_command_line(args: &[String]) -> RunConfiguration {
     if args.len() < 2 {
         print_usage();
@@ -271,7 +265,6 @@ fn parse_command_line(args: &[String]) -> RunConfiguration {
 
     let mut config = RunConfiguration::new();
     
-    // Primeiro argumento é o arquivo do contrato
     config.set_contract_file_name(args[1].clone());
     let file_stem = Path::new(&args[1])
         .file_stem()
@@ -287,7 +280,6 @@ fn parse_command_line(args: &[String]) -> RunConfiguration {
     while i < args.len() {
         let arg = &args[i];
 
-        // Flags curtas combinadas: -vgm
         if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2 {
             for ch in arg.chars().skip(1) {
                 match ch {
@@ -326,7 +318,6 @@ fn parse_command_line(args: &[String]) -> RunConfiguration {
             continue;
         }
 
-        // Flags normais (-v, -g)
         match arg.as_str() {
             "-h" | "--help" => {
                 print_usage();

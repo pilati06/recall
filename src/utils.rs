@@ -486,16 +486,12 @@ impl ContractUtil {
 pub struct AutomatonExporter;
 
 impl AutomatonExporter {
-    /// Exporta estados do autômato em formato CSV
-    /// Formato: id;clause;situation
     pub fn dump_states(automaton: &Automaton) -> String {
         let mut output = String::from("id;clause;situation\n");
         
-        // Coleta e ordena os estados por ID
         let mut states: Vec<_> = automaton.states.iter().collect();
         states.sort_by_key(|s| s.id);
         
-        // Adiciona cada estado ao output
         for state in states {
             let clause_str = if let Some(ref clause) = state.clause {
                 format!("{}", clause)
@@ -521,15 +517,11 @@ impl AutomatonExporter {
         output
     }
 
-    /// Exporta autômato para formato DOT (Graphviz)
-    /// Inclui todas as transições sem merge
     pub fn dump_to_dot(automaton: &Automaton) -> String {
         let mut output = String::from("digraph contract {\nrankdir=LR;\n");
         
-        // Nó inicial invisível
         output.push_str("node [shape = point, color=white, fontcolor=white]; start;\n");
         
-        // Estados notChecked e conflictFree (círculos pretos)
         for state in automaton.states.iter() {
             if state.situation == StateSituation::NotChecked 
                 || state.situation == StateSituation::ConflictFree {
@@ -546,7 +538,6 @@ impl AutomatonExporter {
             }
         }
         
-        // Estados violating (círculos vermelhos preenchidos)
         for state in automaton.states.iter() {
             if state.situation == StateSituation::Violating {
                 let tooltip = if let Some(ref clause) = state.clause {
@@ -562,7 +553,6 @@ impl AutomatonExporter {
             }
         }
         
-        // Estados satisfaction (círculos verdes preenchidos)
         for state in automaton.states.iter() {
             if state.situation == StateSituation::Satisfaction {
                 let tooltip = if let Some(ref clause) = state.clause {
@@ -578,7 +568,6 @@ impl AutomatonExporter {
             }
         }
         
-        // Estados conflicting (círculos laranjas preenchidos)
         for state in automaton.states.iter() {
             if state.situation == StateSituation::Conflicting {
                 let tooltip = if let Some(ref clause) = state.clause {
@@ -594,12 +583,10 @@ impl AutomatonExporter {
             }
         }
         
-        // Transição do estado inicial
         if let Some(ref initial) = automaton.initial {
             output.push_str(&format!("start -> S{}\n", initial.id));
         }
         
-        // Todas as transições - obter symbol table apenas para esta parte
         {
             let symbol_table = SymbolTable::instance();
             let table = symbol_table.lock().unwrap();
@@ -613,14 +600,12 @@ impl AutomatonExporter {
                     actions_str.replace("\"", "\\\"")
                 ));
             }
-        } // Lock é liberado aqui
+        }
         
         output.push_str("}\n");
         output
     }
 
-    /// Exporta autômato para formato texto personalizado
-    /// Formato compatível com o Java original
     pub fn dump_to_text(automaton: &Automaton) -> String {
         let mut output = String::new();
         
@@ -701,15 +686,11 @@ impl AutomatonExporter {
         output
     }
 
-    /// Exporta autômato minimizado para DOT
-    /// Faz merge de transições duplicadas entre os mesmos estados, mantendo a com mais ações
     pub fn dump_to_min_dot(automaton: &Automaton) -> String {
         let mut output = String::from("digraph contract {\nrankdir=LR;\n");
         
-        // Nó inicial invisível
         output.push_str("node [shape = point, color=white, fontcolor=white]; start;\n");
         
-        // Estados notChecked e conflictFree (círculos pretos)
         for state in automaton.states.iter() {
             if state.situation == StateSituation::NotChecked 
                 || state.situation == StateSituation::ConflictFree {
@@ -726,7 +707,6 @@ impl AutomatonExporter {
             }
         }
         
-        // Estados violating (círculos vermelhos preenchidos)
         for state in automaton.states.iter() {
             if state.situation == StateSituation::Violating {
                 let tooltip = if let Some(ref clause) = state.clause {
@@ -742,7 +722,6 @@ impl AutomatonExporter {
             }
         }
         
-        // Estados satisfaction (círculos verdes preenchidos)
         for state in automaton.states.iter() {
             if state.situation == StateSituation::Satisfaction {
                 let tooltip = if let Some(ref clause) = state.clause {
@@ -758,7 +737,6 @@ impl AutomatonExporter {
             }
         }
         
-        // Estados conflicting (círculos laranjas preenchidos)
         for state in automaton.states.iter() {
             if state.situation == StateSituation::Conflicting {
                 let tooltip = if let Some(ref clause) = state.clause {
@@ -774,12 +752,10 @@ impl AutomatonExporter {
             }
         }
         
-        // Transição do estado inicial
         if let Some(ref initial) = automaton.initial {
             output.push_str(&format!("start -> S{}\n", initial.id));
         }
         
-        // Merge de transições: manter apenas a com mais ações para cada par (from, to)
         let mut transition_map: HashMap<(usize, usize), Vec<std::sync::Arc<RelativizedAction>>> = HashMap::new();
         
         for transition in automaton.transitions.iter() {
@@ -787,7 +763,6 @@ impl AutomatonExporter {
             
             transition_map.entry(key)
                 .and_modify(|existing_actions| {
-                    // Se a transição atual tem mais ações, substitui
                     if transition.actions.len() > existing_actions.len() {
                         *existing_actions = transition.actions.clone();
                     }
@@ -795,11 +770,9 @@ impl AutomatonExporter {
                 .or_insert_with(|| transition.actions.clone());
         }
         
-        // Ordenar as transições para saída consistente
         let mut sorted_transitions: Vec<_> = transition_map.into_iter().collect();
         sorted_transitions.sort_by_key(|(k, _)| *k);
         
-        // Escrever transições mescladas - obter lock apenas aqui
         {
             let symbol_table = SymbolTable::instance();
             let table = symbol_table.lock().unwrap();
@@ -813,7 +786,7 @@ impl AutomatonExporter {
                     actions_str.replace("\"", "\\\"")
                 ));
             }
-        } // Lock é liberado aqui
+        }
         
         output.push_str("}\n");
         output
@@ -821,7 +794,6 @@ impl AutomatonExporter {
     
     // ==================== Funções auxiliares ====================
     
-    /// Formata uma lista de RelativizedActions para exibição
     fn format_actions(
         actions: &[std::sync::Arc<RelativizedAction>], 
         symbol_table: &SymbolTable

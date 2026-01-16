@@ -145,7 +145,6 @@ impl AutomataConstructor {
             return;
         }
 
-
         let compressed_actions = self.generate_actions(&clause, &individuals, logger);
 
         let source_map = &compressed_actions.source_map;
