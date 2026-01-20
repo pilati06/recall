@@ -7,11 +7,91 @@ use chrono::Local;
 use rustc_hash::FxHashSet;
 use super::*;
 use rayon::prelude::*;
+use sysinfo::{System, Pid, ProcessesToUpdate};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct CompressedConcurrentActions {
     pub source_map: Vec<Arc<RelativizedAction>>,
     pub valid_masks: Vec<u32>,
+}
+
+// ==================== memory management =================
+
+pub struct MemoryGuard {
+    max_usage_mb: u64,
+}
+
+impl MemoryGuard {
+    pub fn new(max_usage_mb: u64) -> Self {
+        Self {
+            max_usage_mb,
+        }
+    }
+
+    pub fn start_monitoring(&self) -> Arc<AtomicBool> {
+        let should_terminate = Arc::new(AtomicBool::new(false));
+        let clone = should_terminate.clone();
+        let max_usage = self.max_usage_mb;
+        
+        std::thread::spawn(move || {
+            let mut sys = System::new_all();
+            let mut consecutive_warnings = 0;
+            
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+                
+                if clone.load(Ordering::Relaxed) {
+                    break;
+                }
+                
+                sys.refresh_memory();
+                sys.refresh_processes(ProcessesToUpdate::All, true);
+                
+                let available_mb = sys.available_memory() / 1024 / 1024;
+                
+                // Obter memória do processo atual
+                let current_pid = sysinfo::get_current_pid().unwrap();
+                let process_mb = if let Some(process) = sys.process(Pid::from_u32(current_pid.as_u32())) {
+                    process.memory() / 1024 / 1024
+                } else {
+                    0
+                };
+                
+                // CRÍTICO: processo usando muita memória
+                if process_mb > max_usage {
+                    eprintln!("🔴 CRITICAL: Process using {}MB (limit: {}MB)", 
+                        process_mb, max_usage);
+                    eprintln!("🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH");
+                    std::process::exit(137);
+                }
+                
+                // CRÍTICO: sistema sem memória
+                if available_mb < 1024 {
+                    consecutive_warnings += 1;
+                    eprintln!("🟡 WARNING {}: Only {}MB available in system", 
+                        consecutive_warnings, available_mb);
+                    
+                    if consecutive_warnings >= 3 {
+                        eprintln!("🔴 CRITICAL: System memory exhausted");
+                        eprintln!("🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH");
+                        std::process::exit(137);
+                    }
+                } else {
+                    consecutive_warnings = 0;
+                }
+                
+                // Log periódico a cada ~500MB
+                if process_mb > 0 && process_mb % 500 < 50 {
+                    println!("📊 Memory: Process={}MB, Available={}MB", 
+                        process_mb, available_mb);
+                }
+            }
+        });
+        
+        should_terminate
+    }
 }
 
 // ==================== symbol_type.rs ====================

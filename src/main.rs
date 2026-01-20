@@ -26,14 +26,8 @@ use std::path::Path;
 use std::fs;
 
 fn main() {
-    // ThreadPoolBuilder::new()
-    // .num_threads(5)
-    // .build_global()
-    // .unwrap();
-
     let args: Vec<String> = std::env::args().collect();
     let config = parse_command_line(&args);
-    
     let mut logger = match Logger::new(config.clone()) {
         Ok(l) => l,
         Err(e) => {
@@ -41,6 +35,23 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    let total_ram_mb = get_system_total_memory_mb();
+    let max_process_mb = calculate_safe_memory_limit(total_ram_mb);
+    
+    let memory_guard = MemoryGuard::new(max_process_mb);
+    let _guard_handle = memory_guard.start_monitoring();
+    
+    logger.log(LogType::Additional, "Memory guard active:");
+    logger.log(LogType::Additional, &format!("   - System RAM: {}MB", total_ram_mb));
+    logger.log(LogType::Additional, &format!("   - Process limit: {}MB ({:.0}% of total)", 
+                max_process_mb,
+                (max_process_mb as f64 / total_ram_mb as f64) * 100.0));
+
+    // ThreadPoolBuilder::new()
+    // .num_threads(5)
+    // .build_global()
+    // .unwrap();
 
     logger.log(LogType::Additional, &format!("Using {:?}", config));
     logger.log(
@@ -64,6 +75,36 @@ fn main() {
             }
         }
     }
+}
+
+fn get_system_total_memory_mb() -> u64 {
+    use sysinfo::{System};
+    
+    let mut sys = System::new_all();
+    sys.refresh_memory();
+    sys.total_memory() / 1024 / 1024
+}
+
+fn calculate_safe_memory_limit(total_ram_mb: u64) -> u64 {
+    // Estratégia adaptativa baseada na RAM total
+    let percentage = if total_ram_mb >= 16 * 1024 {
+        // 16GB+ : usar 80%
+        0.80
+    } else if total_ram_mb >= 8 * 1024 {
+        // 8-16GB: usar 75%
+        0.75
+    } else if total_ram_mb >= 4 * 1024 {
+        // 4-8GB: usar 70%
+        0.70
+    } else {
+        // <4GB: usar 60%
+        0.60
+    };
+    
+    let limit = (total_ram_mb as f64 * percentage) as u64;
+    
+    // Garantir mínimo de 2GB e máximo razoável
+    limit.max(2048).min(total_ram_mb - 1024) // Deixar pelo menos 1GB pro SO
 }
 
 fn run_analysis(
