@@ -13,7 +13,7 @@ use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct CompressedConcurrentActions {
-    pub source_map: Vec<Arc<RelativizedAction>>,
+    pub source_map: Arc<Vec<Arc<RelativizedAction>>>,
     pub valid_masks: Vec<u32>,
 }
 
@@ -155,6 +155,7 @@ static INSTANCE: OnceLock<Arc<Mutex<SymbolTable>>> = OnceLock::new();
 pub struct SymbolTable {
     id_base: i32,
     dictionary: Vec<Symbol>,
+    lookup: HashMap<(String, SymbolType), i32>,
 }
 
 impl SymbolTable {
@@ -162,6 +163,7 @@ impl SymbolTable {
         SymbolTable {
             id_base: 1,
             dictionary: Vec::new(),
+            lookup: HashMap::new(),
         }
     }
 
@@ -172,15 +174,15 @@ impl SymbolTable {
     }
 
     pub fn add_symbol(&mut self, value: String, symbol_type: SymbolType) -> i32 {
-        if let Some(symbol) = self.dictionary.iter()
-            .find(|s| s.symbol_type == symbol_type && s.value == value) {
-            return symbol.id;
+        if let Some(&id) = self.lookup.get(&(value.clone(), symbol_type)) {
+            return id;
         }
 
         let id = self.id_base;
         self.id_base += 1;
-        let symbol = Symbol::new(id, value, symbol_type);
+        let symbol = Symbol::new(id, value.clone(), symbol_type);
         self.dictionary.push(symbol);
+        self.lookup.insert((value, symbol_type), id);
         id
     }
 
@@ -207,6 +209,7 @@ impl SymbolTable {
     pub fn clear(&mut self) {
         self.id_base = 1;
         self.dictionary.clear();
+        self.lookup.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -522,7 +525,8 @@ impl ContractUtil {
         let current_time = std::time::Instant::now();
         
         let src: Vec<Arc<RelativizedAction>> = relativized_actions.into_iter().collect();
-        let n = src.len();
+        let src_arc = Arc::new(src);
+        let n = src_arc.len();
 
         let size: u64 = 1 << n; // 2^n
 
@@ -534,7 +538,7 @@ impl ContractUtil {
                 
                 while temp_mask > 0 {
                     let idx = temp_mask.trailing_zeros();
-                    if let Some(act) = src.get(idx as usize) {
+                    if let Some(act) = src_arc.get(idx as usize) {
                         temp_set.insert(act.clone());
                     }
                     temp_mask &= temp_mask - 1;
@@ -555,7 +559,7 @@ impl ContractUtil {
                 valid_masks.len(), elapsed));
 
         CompressedConcurrentActions {
-            source_map: src,
+            source_map: src_arc,
             valid_masks,
         }
     }
@@ -672,7 +676,8 @@ impl AutomatonExporter {
             let table = symbol_table.lock().unwrap();
             
             for transition in automaton.transitions.iter() {
-                let actions_str = Self::format_actions(&transition.actions, &table);
+                let actions_vec = transition.actions();
+                let actions_str = Self::format_actions(&actions_vec, &table);
                 output.push_str(&format!(
                     "\tS{} -> S{} [ label = \"{}\" ];\n",
                     transition.from,
@@ -735,8 +740,9 @@ impl AutomatonExporter {
         let mut transitions_strs = Vec::new();
         for transition in automaton.transitions.iter() {
             let mut actions_parts = Vec::new();
+            let transition_actions = transition.actions();
             
-            for ra in transition.actions.iter() {
+            for ra in transition_actions.iter() {
                 let sender_name = table.get_symbol_by_id(ra.sender)
                     .map(|s| s.value.as_str())
                     .unwrap_or("?");
@@ -843,11 +849,11 @@ impl AutomatonExporter {
             
             transition_map.entry(key)
                 .and_modify(|existing_actions| {
-                    if transition.actions.len() > existing_actions.len() {
-                        *existing_actions = transition.actions.clone();
+                    if transition.actions().len() > existing_actions.len() {
+                        *existing_actions = transition.actions().clone();
                     }
                 })
-                .or_insert_with(|| transition.actions.clone());
+                .or_insert_with(|| transition.actions().clone());
         }
         
         let mut sorted_transitions: Vec<_> = transition_map.into_iter().collect();

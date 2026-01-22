@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::fmt;
 
 use crate::{Clause, Contract, BasicAction, DeonticClauseType, RelativizationType, SymbolTable, RelativizedAction};
+use rustc_hash::FxHashMap;
 
 // ==================== StateSituation ====================
 
@@ -128,17 +129,32 @@ pub struct Transition {
     pub id: usize,
     pub from: usize,
     pub to: usize,
-    pub actions: Vec<Arc<RelativizedAction>>,
+    pub mask: u32,
+    pub source_map: Arc<Vec<Arc<RelativizedAction>>>,
 }
 
 impl Transition {
-    pub fn new(from: usize, to: usize, actions: Vec<Arc<RelativizedAction>>) -> Self {
+    pub fn new(from: usize, to: usize, mask: u32, source_map: Arc<Vec<Arc<RelativizedAction>>>) -> Self {
         Transition {
             id: TRANSITION_COUNTER.fetch_add(1, Ordering::SeqCst),
             from,
             to,
-            actions,
+            mask,
+            source_map,
         }
+    }
+
+    pub fn actions(&self) -> Vec<Arc<RelativizedAction>> {
+        let mut actions = Vec::with_capacity(self.mask.count_ones() as usize);
+        let mut temp_mask = self.mask;
+        while temp_mask > 0 {
+            let idx = temp_mask.trailing_zeros();
+            if let Some(act) = self.source_map.get(idx as usize) {
+                actions.push(act.clone());
+            }
+            temp_mask &= temp_mask - 1;
+        }
+        actions
     }
 }
 
@@ -158,8 +174,8 @@ impl std::hash::Hash for Transition {
 
 impl fmt::Display for Transition {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "T{}: {} -> {} [{:?}]", 
-            self.id, self.from, self.to, self.actions)
+        write!(f, "T{}: {} -> {} [mask: {}]", 
+            self.id, self.from, self.to, self.mask)
     }
 }
 
@@ -237,16 +253,22 @@ pub struct Automaton {
     pub initial: Option<State>,
     pub transitions: FxHashSet<Transition>,
     pub conflict_found: bool,
+    pub state_map: FxHashMap<Clause, usize>,
 }
 
 impl Automaton {
     pub fn new(contract: Contract) -> Self {
         let full_contract = contract.get_full_contract();
-        let initial = full_contract.map(|clause| State::with_auto_id(Some(clause)));
+        let initial = full_contract.clone().map(|clause| State::with_auto_id(Some(clause)));
         
         let mut states = FxHashSet::default();
+        let mut state_map = FxHashMap::default();
+        
         if let Some(ref initial_state) = initial {
             states.insert(initial_state.clone());
+            if let Some(ref clause) = initial_state.clause {
+                state_map.insert(clause.clone(), initial_state.id);
+            }
         }
 
         Automaton {
@@ -254,10 +276,14 @@ impl Automaton {
             initial,
             transitions: FxHashSet::default(),
             conflict_found: false,
+            state_map,
         }
     }
 
     pub fn add_state(&mut self, state: State) -> bool {
+        if let Some(ref clause) = state.clause {
+            self.state_map.insert(clause.clone(), state.id);
+        }
         self.states.insert(state)
     }
 
@@ -266,13 +292,7 @@ impl Automaton {
     }
 
     pub fn get_state_by_clause(&self, clause: &Clause) -> Option<&State> {
-        self.states.iter().find(|s| {
-            if let Some(ref state_clause) = s.clause {
-                state_clause == clause
-            } else {
-                false
-            }
-        })
+        self.state_map.get(clause).and_then(|&id| self.get_state_by_id(id))
     }
 
     pub fn get_state_by_id(&self, id: usize) -> Option<&State> {
@@ -302,7 +322,19 @@ impl Automaton {
             trace: Vec::new(),
         }) {
             let mut state = state;
+            
+            // Remove from map if clause exists before update (though clause shouldn't change)
+            if let Some(ref clause) = state.clause {
+                self.state_map.remove(clause);
+            }
+            
             f(&mut state);
+            
+            // Re-insert into map
+            if let Some(ref clause) = state.clause {
+                self.state_map.insert(clause.clone(), state.id);
+            }
+            
             self.states.insert(state);
             true
         } else {
@@ -311,16 +343,26 @@ impl Automaton {
     }
 
     pub fn get_state_by_id_mut(&mut self, id: usize) -> Option<State> {
-        self.states.take(&State {
+        let state = self.states.take(&State {
             id,
             clause: None,
             situation: StateSituation::NotChecked,
             conflict_information: None,
             trace: Vec::new(),
-        })
+        });
+        
+        if let Some(ref s) = state {
+            if let Some(ref clause) = s.clause {
+                self.state_map.remove(clause);
+            }
+        }
+        state
     }
 
     pub fn replace_state(&mut self, state: State) -> bool {
+        if let Some(ref clause) = state.clause {
+            self.state_map.insert(clause.clone(), state.id);
+        }
         self.states.replace(state).is_some()
     }
 

@@ -131,7 +131,7 @@ fn run_analysis(
     let table = symbol_table.lock().unwrap();
 
     logger.log(LogType::Additional, &format!("{}", *table));
-    drop(table);
+    drop(table); 
 
     logger.log(LogType::Minimal, "Processing contract...");
 
@@ -143,7 +143,7 @@ fn run_analysis(
 
     // Imprime resultado
     let result = print_result(&automaton, elapsed.as_millis() as u64);
-    logger.log(LogType::Necessary, &result);
+    logger.log(LogType::Minimal, &result);
 
     // Exporta decomposições
     if config.is_export_decompositions() {
@@ -230,7 +230,7 @@ fn print_trace(automaton: &Automaton) -> String {
                         ConsoleColors::FG_RED,
                         transition.id,
                         ConsoleColors::FG_BLUE,
-                        transition.actions.iter()
+                        transition.actions().iter()
                         .map(|a| a.to_string())
                         .collect::<Vec<_>>()
                         .join(", "),

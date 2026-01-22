@@ -1,4 +1,4 @@
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashSet, FxHashMap};
 use std::sync::Arc;
 use crate::{
     Clause, RelativizedAction, Conflict, RelativizationType, 
@@ -9,6 +9,7 @@ use crate::{
 /// Extrator de ações que calcula ações relativizadas e concorrentes
 pub struct ActionExtractor {
     conflicts: Vec<Conflict>,
+    cache: FxHashMap<Clause, CompressedConcurrentActions>,
 }
 
 impl ActionExtractor {
@@ -20,6 +21,7 @@ impl ActionExtractor {
     pub fn new(conflicts: Vec<Conflict>) -> Self {
         ActionExtractor {
             conflicts,
+            cache: FxHashMap::default(),
         }
     }
 
@@ -39,6 +41,9 @@ impl ActionExtractor {
     ) -> CompressedConcurrentActions {
         let processed = ClauseDecomposer::process_composed_actions(clause);
         
+        if let Some(cached) = self.cache.get(&processed) {
+            return cached.clone();
+        }
         let actions = self.calculate_relativized_actions(&processed, indiv);
         
         logger.log(LogType::Necessary, &format!(
@@ -57,15 +62,18 @@ impl ActionExtractor {
         );
         
         if compressed_result.source_map.len() == 1 {
-            let action = &compressed_result.source_map[0];
+            let negation = {
+                let action = &compressed_result.source_map[0];
+                Arc::new(RelativizedAction::negation(action))
+            };
             
-            let negation = Arc::new(RelativizedAction::negation(action));
-            compressed_result.source_map.push(negation);
+            Arc::make_mut(&mut compressed_result.source_map).push(negation);
             let new_index = compressed_result.source_map.len() - 1;
             let new_mask: u32 = 1 << new_index;
             compressed_result.valid_masks.push(new_mask);
         }
         
+        self.cache.insert(processed, compressed_result.clone());
         compressed_result
     }
 

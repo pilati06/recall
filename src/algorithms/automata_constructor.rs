@@ -150,12 +150,10 @@ impl AutomataConstructor {
         let source_map = &compressed_actions.source_map;
         let masks = &compressed_actions.valid_masks;
 
-        const BATCH_SIZE: usize = 2000; 
+        const BATCH_SIZE: usize = 500; 
 
         for chunk in masks.chunks(BATCH_SIZE) {
-            
             let batch_results: Vec<_> = {
-        
                 let decomposer = Some(ClauseDecomposer::new(
                     individuals.clone(),
                     true,
@@ -163,17 +161,12 @@ impl AutomataConstructor {
 
                 chunk.par_iter()
                     .map(|&mask| {
-                        let mut action_list = Vec::with_capacity(mask.count_ones() as usize);
-                        let mut temp_mask = mask;
-                        
                         let mut temp_set_for_logic = FxHashSet::default();
-
+                        let mut temp_mask = mask;
                         while temp_mask > 0 {
                             let idx = temp_mask.trailing_zeros();
                             if let Some(act) = source_map.get(idx as usize) {
-                                let action_ref = act.clone();
-                                action_list.push(action_ref.clone());
-                                temp_set_for_logic.insert(action_ref);
+                                temp_set_for_logic.insert(act.clone());
                             }
                             temp_mask &= temp_mask - 1;
                         }
@@ -181,17 +174,15 @@ impl AutomataConstructor {
                         // Calcula próxima cláusula usando o Set (lógica booleana)
                         let next_clause = decomposer.as_ref().unwrap().decompose(&clause, &temp_set_for_logic);
 
-                        // Retorna o VEC para ser armazenado na transição
-                        (action_list, next_clause)
+                        (mask, next_clause)
                     })
                     .collect() 
             };
 
-            for (action_set, next_clause) in batch_results {
+            for (mask, next_clause) in batch_results {
                 if let Some(ref mut automaton) = self.automaton {
-                    
                     if let Some(existing_state) = automaton.get_state_by_clause(&next_clause) {
-                        let transition = Transition::new(state_id, existing_state.id, action_set);
+                        let transition = Transition::new(state_id, existing_state.id, mask, source_map.clone());
                         automaton.add_transition(transition);
                     } else {
                         let new_state = State::with_auto_id(Some(next_clause.clone()));
@@ -201,7 +192,7 @@ impl AutomataConstructor {
                         
                         automaton.add_state(new_state);
                         
-                        let transition = Transition::new(state_id, new_state_id, action_set);
+                        let transition = Transition::new(state_id, new_state_id, mask, source_map.clone());
                         let transition_id = transition.id;
                         automaton.add_transition(transition);
                         
@@ -263,7 +254,7 @@ impl AutomataConstructor {
         }
 
         CompressedConcurrentActions {
-            source_map: Vec::new(),
+            source_map: Arc::new(Vec::new()),
             valid_masks: Vec::new(),
         }
     }
