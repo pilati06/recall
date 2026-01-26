@@ -49,9 +49,9 @@ impl MemoryGuard {
                 sys.refresh_memory();
                 sys.refresh_processes(ProcessesToUpdate::All, true);
                 
-                let available_mb = sys.available_memory() / 1024 / 1024;
+                let free_mb = sys.free_memory() / 1024 / 1024;
+                let total_mb = sys.total_memory() / 1024 / 1024;
                 
-                // Obter memória do processo atual
                 let current_pid = sysinfo::get_current_pid().unwrap();
                 let process_mb = if let Some(process) = sys.process(Pid::from_u32(current_pid.as_u32())) {
                     process.memory() / 1024 / 1024
@@ -68,13 +68,15 @@ impl MemoryGuard {
                 }
                 
                 // CRÍTICO: sistema sem memória
-                if available_mb < 1024 {
+                let critical_threshold_mb = (total_mb as f64 * 0.05).max(256.0) as u64;
+                
+                if free_mb < critical_threshold_mb {
                     consecutive_warnings += 1;
-                    eprintln!("🟡 WARNING {}: Only {}MB available in system", 
-                        consecutive_warnings, available_mb);
+                    eprintln!("🟡 WARNING {}: Only {}MB free in system (critical threshold: {}MB)", 
+                        consecutive_warnings, free_mb, critical_threshold_mb);
                     
-                    if consecutive_warnings >= 3 {
-                        eprintln!("🔴 CRITICAL: System memory exhausted");
+                    if consecutive_warnings >= 5 {
+                        eprintln!("🔴 CRITICAL: System memory critically low");
                         eprintln!("🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH");
                         std::process::exit(137);
                     }
@@ -84,8 +86,8 @@ impl MemoryGuard {
                 
                 // Log periódico a cada ~500MB
                 if process_mb > 0 && process_mb % 500 < 50 {
-                    println!("📊 Memory: Process={}MB, Available={}MB", 
-                        process_mb, available_mb);
+                    println!("📊 Memory: Process={}MB, Free={}MB, Total={}MB", 
+                        process_mb, free_mb, total_mb);
                 }
             }
         });
