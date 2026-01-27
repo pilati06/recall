@@ -52,6 +52,16 @@ impl MemoryGuard {
                 let free_mb = sys.free_memory() / 1024 / 1024;
                 let total_mb = sys.total_memory() / 1024 / 1024;
                 
+                // On macOS, include swap memory in available memory calculation
+                // macOS actively uses swap as part of its memory management
+                #[cfg(target_os = "macos")]
+                let free_swap_mb = sys.free_swap() / 1024 / 1024;
+                #[cfg(target_os = "macos")]
+                let available_mb = free_mb + free_swap_mb;
+                
+                #[cfg(not(target_os = "macos"))]
+                let available_mb = free_mb;
+                
                 let current_pid = sysinfo::get_current_pid().unwrap();
                 let process_mb = if let Some(process) = sys.process(Pid::from_u32(current_pid.as_u32())) {
                     process.memory() / 1024 / 1024
@@ -70,10 +80,16 @@ impl MemoryGuard {
                 // CRÍTICO: sistema sem memória
                 let critical_threshold_mb = (total_mb as f64 * 0.05).max(256.0) as u64;
                 
-                if free_mb < critical_threshold_mb {
+                if available_mb < critical_threshold_mb {
                     consecutive_warnings += 1;
+                    
+                    #[cfg(target_os = "macos")]
+                    eprintln!("🟡 WARNING {}: Only {}MB available ({}MB RAM + {}MB swap, critical threshold: {}MB)", 
+                        consecutive_warnings, available_mb, free_mb, free_swap_mb, critical_threshold_mb);
+                    
+                    #[cfg(not(target_os = "macos"))]
                     eprintln!("🟡 WARNING {}: Only {}MB free in system (critical threshold: {}MB)", 
-                        consecutive_warnings, free_mb, critical_threshold_mb);
+                        consecutive_warnings, available_mb, critical_threshold_mb);
                     
                     if consecutive_warnings >= 5 {
                         eprintln!("🔴 CRITICAL: System memory critically low");
@@ -86,8 +102,13 @@ impl MemoryGuard {
                 
                 // Log periódico a cada ~500MB
                 if process_mb > 0 && process_mb % 500 < 50 {
+                    #[cfg(target_os = "macos")]
+                    println!("📊 Memory: Process={}MB, Available={}MB (RAM: {}MB + Swap: {}MB), Total={}MB", 
+                        process_mb, available_mb, free_mb, free_swap_mb, total_mb);
+                    
+                    #[cfg(not(target_os = "macos"))]
                     println!("📊 Memory: Process={}MB, Free={}MB, Total={}MB", 
-                        process_mb, free_mb, total_mb);
+                        process_mb, available_mb, total_mb);
                 }
             }
         });
