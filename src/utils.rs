@@ -274,7 +274,7 @@ pub struct RunConfiguration {
     automaton_file_name: String,
     log_level: LogLevel,
     global_log_filename: String,
-    //test: bool,
+    test: bool,
 }
 
 impl RunConfiguration {
@@ -291,7 +291,7 @@ impl RunConfiguration {
             automaton_file_name: String::new(),
             log_level: LogLevel::Normal,
             global_log_filename: String::new(),
-            //test: false,
+            test: false,
         }
     }
 
@@ -303,6 +303,7 @@ impl RunConfiguration {
     pub fn is_continue_on_conflict(&self) -> bool { self.continue_on_conflict }
     pub fn is_export_min_automaton(&self) -> bool { self.export_min_automaton }
     pub fn is_use_prunning(&self) -> bool { self.use_prunning }
+    pub fn is_test(&self) -> bool { self.test }
     pub fn decompositions_file_name(&self) -> &str { &self.decompositions_file_name }
     pub fn automaton_file_name(&self) -> &str { &self.automaton_file_name }
     pub fn log_level(&self) -> LogLevel { self.log_level }
@@ -320,7 +321,7 @@ impl RunConfiguration {
     pub fn set_global_log_filename(&mut self, name: String) { self.global_log_filename = name; }
     pub fn set_automaton_file_name(&mut self, name: String) { self.automaton_file_name = name; }
     pub fn set_decompositions_file_name(&mut self, name: String) { self.decompositions_file_name = name; }
-    //pub fn set_test(&mut self, value: bool) { self.test = value; }
+    pub fn set_test(&mut self, value: bool) { self.test = value; }
 }
 
 impl Default for RunConfiguration {

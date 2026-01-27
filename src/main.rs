@@ -36,29 +36,32 @@ fn main() {
         }
     };
 
-    let total_ram_mb = get_system_total_memory_mb();
-    let max_process_mb = calculate_safe_memory_limit(total_ram_mb);
+
+    if config.is_test() {
+        let total_ram_mb = get_system_total_memory_mb();
+        let max_process_mb = calculate_safe_memory_limit(total_ram_mb);
+        
+        let memory_guard = MemoryGuard::new(max_process_mb);
+        let _guard_handle = memory_guard.start_monitoring();
+        
+        logger.log(LogType::Additional, "Memory guard active:");
+        logger.log(LogType::Additional, &format!("   - System RAM: {}MB", total_ram_mb));
+        logger.log(LogType::Additional, &format!("   - Process limit: {}MB ({:.0}% of total)", 
+                    max_process_mb,
+                    (max_process_mb as f64 / total_ram_mb as f64) * 100.0));
+
+        // ThreadPoolBuilder::new()
+        // .num_threads(5)
+        // .build_global()
+        // .unwrap();
+
+        logger.log(LogType::Additional, &format!("Using {:?}", config));
+        logger.log(
+            LogType::Minimal,
+            &format!("Analysing contract in {}", config.contract_file_name()),
+        );
+    }
     
-    let memory_guard = MemoryGuard::new(max_process_mb);
-    let _guard_handle = memory_guard.start_monitoring();
-    
-    logger.log(LogType::Additional, "Memory guard active:");
-    logger.log(LogType::Additional, &format!("   - System RAM: {}MB", total_ram_mb));
-    logger.log(LogType::Additional, &format!("   - Process limit: {}MB ({:.0}% of total)", 
-                max_process_mb,
-                (max_process_mb as f64 / total_ram_mb as f64) * 100.0));
-
-    // ThreadPoolBuilder::new()
-    // .num_threads(5)
-    // .build_global()
-    // .unwrap();
-
-    logger.log(LogType::Additional, &format!("Using {:?}", config));
-    logger.log(
-        LogType::Minimal,
-        &format!("Analysing contract in {}", config.contract_file_name()),
-    );
-
     match run_analysis(config, &mut logger) {
         Ok(_) => {
             logger.log(LogType::Minimal, "Analysis completed successfully");
@@ -344,9 +347,9 @@ fn parse_command_line(args: &[String]) -> RunConfiguration {
                     'm' => {
                         config.set_export_min_automaton(true);
                     }
-                    // 't' => {
-                    //     config.set_test(true);
-                    // }
+                    't' => {
+                        config.set_test(true);
+                    }
                     _ => {
                         eprintln!("Unknown option: -{}", ch);
                         print_usage();
@@ -380,9 +383,9 @@ fn parse_command_line(args: &[String]) -> RunConfiguration {
             "-m" => {
                 config.set_export_min_automaton(true);
             }
-            // "-t" => {
-            //     config.set_test(true);
-            // }
+            "-t" => {
+                config.set_test(true);
+            }
             _ => {
                 eprintln!("Unknown option: {}", arg);
                 print_usage();
@@ -409,7 +412,7 @@ fn print_usage() {
     println!("    -n, --no-prunning   Don't use the prunning method");
     println!("    -c, --continue      Continues the analysis if a conflict is found");
     println!("    -m                  Export minimized automaton");
-    //println!("    -t                  Test mode (outputs CSV metrics)\n");
+    println!("    -t                  Test mode (outputs CSV metrics)\n");
     println!("EXAMPLES:");
     println!("    recall contract.rcl");
     println!("        Analyzes a contract in the file 'contract.rcl'");
