@@ -91,17 +91,17 @@ fn get_system_total_memory_mb() -> u64 {
 fn calculate_safe_memory_limit(total_ram_mb: u64) -> u64 {
     // Estratégia adaptativa baseada na RAM total
     let percentage = if total_ram_mb >= 16 * 1024 {
-        // 16GB+ : usar 80%
-        0.80
+        // 16GB+ : usar 95%
+        0.95
     } else if total_ram_mb >= 8 * 1024 {
-        // 8-16GB: usar 75%
-        0.75
+        // 8-16GB: usar 90%
+        0.90
     } else if total_ram_mb >= 4 * 1024 {
-        // 4-8GB: usar 70%
-        0.70
+        // 4-8GB: usar 85%
+        0.85
     } else {
-        // <4GB: usar 60%
-        0.60
+        // <4GB: usar 80%
+        0.80
     };
     
     let limit = (total_ram_mb as f64 * percentage) as u64;
