@@ -58,7 +58,7 @@ impl DeonticTag {
     }
 
     pub fn format_with_symbols(&self, symbol_table: &SymbolTable) -> String {
-        let symbol = self.deontic_type.symbol();
+        let symbol = self.deontic_type.short_symbol();
         
         match self.relativization {
             RelativizationType::Directed => {
@@ -68,16 +68,16 @@ impl DeonticTag {
                 let receiver_name = symbol_table.get_symbol_by_id(self.receiver)
                     .map(|s| s.value.as_str())
                     .unwrap_or("?");
-                format!("{}({},{},{})", symbol, sender_name, self.action, receiver_name)
+                format!("{}({},{},{})", symbol, sender_name, self.action.format_with_symbols(symbol_table), receiver_name)
             }
             RelativizationType::Relativized => {
                 let sender_name = symbol_table.get_symbol_by_id(self.sender)
                     .map(|s| s.value.as_str())
                     .unwrap_or("?");
-                format!("{}({},{})", symbol, sender_name, self.action)
+                format!("{}({},{})", symbol, sender_name, self.action.format_with_symbols(symbol_table))
             }
             RelativizationType::Global => {
-                format!("{}({})", symbol, self.action)
+                format!("{}({})", symbol, self.action.format_with_symbols(symbol_table))
             }
         }
     }
@@ -86,8 +86,9 @@ impl DeonticTag {
 impl fmt::Display for DeonticTag {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // Usa uma symbol table padrão para display
-        let symbol_table = SymbolTable::default();
-        write!(f, "{}", self.format_with_symbols(&symbol_table))
+        let symbol_table = SymbolTable::instance();
+        let table = symbol_table.lock().unwrap();
+        write!(f, "{}", self.format_with_symbols(&table))
     }
 }
 
@@ -116,7 +117,10 @@ impl ConflictInformation {
 
 impl fmt::Display for ConflictInformation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} conflicts with {:?}", self.tag, self.conflicting_tags)
+        let conflicting: Vec<String> = self.conflicting_tags.iter()
+            .map(|t| t.to_string())
+            .collect();
+        write!(f, "{} conflicts with [{}]", self.tag, conflicting.join(", "))
     }
 }
 

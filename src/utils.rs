@@ -8,8 +8,9 @@ use rustc_hash::FxHashSet;
 use super::*;
 use rayon::prelude::*;
 use sysinfo::{System, Pid, ProcessesToUpdate};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
+
 
 #[derive(Clone, Debug)]
 pub struct CompressedConcurrentActions {
@@ -21,12 +22,16 @@ pub struct CompressedConcurrentActions {
 
 pub struct MemoryGuard {
     max_usage_mb: u64,
+    logger: Logger,
+    pub max_used: Arc<AtomicU64>,
 }
 
 impl MemoryGuard {
-    pub fn new(max_usage_mb: u64) -> Self {
+    pub fn new(max_usage_mb: u64, logger: Logger) -> Self {
         Self {
             max_usage_mb,
+            logger,
+            max_used: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -34,14 +39,14 @@ impl MemoryGuard {
         let should_terminate = Arc::new(AtomicBool::new(false));
         let clone = should_terminate.clone();
         let max_usage = self.max_usage_mb;
+        let max_used_shared = self.max_used.clone();
+        let logger = self.logger.clone();
         
         std::thread::spawn(move || {
             let mut sys = System::new_all();
-            let mut consecutive_warnings = 0;
+            //let mut consecutive_warnings = 0;
             
             loop {
-                std::thread::sleep(Duration::from_secs(1));
-                
                 if clone.load(Ordering::Relaxed) {
                     break;
                 }
@@ -49,18 +54,18 @@ impl MemoryGuard {
                 sys.refresh_memory();
                 sys.refresh_processes(ProcessesToUpdate::All, true);
                 
-                let free_mb = sys.free_memory() / 1024 / 1024;
-                let total_mb = sys.total_memory() / 1024 / 1024;
+                // let free_mb = sys.free_memory() / 1024 / 1024;
+                // let total_mb = sys.total_memory() / 1024 / 1024;
                 
                 // On macOS, include swap memory in available memory calculation
                 // macOS actively uses swap as part of its memory management
-                #[cfg(target_os = "macos")]
-                let free_swap_mb = sys.free_swap() / 1024 / 1024;
-                #[cfg(target_os = "macos")]
-                let available_mb = free_mb + free_swap_mb;
+                // #[cfg(target_os = "macos")]
+                // let free_swap_mb = sys.free_swap() / 1024 / 1024;
+                // #[cfg(target_os = "macos")]
+                // let available_mb = free_mb + free_swap_mb;
                 
-                #[cfg(not(target_os = "macos"))]
-                let available_mb = free_mb;
+                // #[cfg(not(target_os = "macos"))]
+                // let available_mb = free_mb;
                 
                 let current_pid = sysinfo::get_current_pid().unwrap();
                 let process_mb = if let Some(process) = sys.process(Pid::from_u32(current_pid.as_u32())) {
@@ -68,48 +73,59 @@ impl MemoryGuard {
                 } else {
                     0
                 };
+
+                if process_mb > max_used_shared.load(Ordering::Relaxed) {                    
+                    max_used_shared.store(process_mb, Ordering::Relaxed);
+                }
                 
                 // CRÍTICO: processo usando muita memória
                 if process_mb > max_usage {
-                    eprintln!("🔴 CRITICAL: Process using {}MB (limit: {}MB)", 
-                        process_mb, max_usage);
-                    eprintln!("🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH");
+                    let msg = format!("🔴 CRITICAL: Process using {}MB (limit: {}MB)", process_mb, max_usage);
+                    eprintln!("{}", msg);
+                    logger.log(LogType::Necessary, &msg);
+                    
+                    let msg = "🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH";
+                    eprintln!("{}", msg);
+                    logger.log(LogType::Necessary, msg);
+
                     std::process::exit(137);
                 }
                 
                 // CRÍTICO: sistema sem memória
-                let critical_threshold_mb = (total_mb as f64 * 0.05).max(256.0) as u64;
+                // let critical_threshold_mb = (total_mb as f64 * 0.05).max(256.0) as u64;
                 
-                if available_mb < critical_threshold_mb {
-                    consecutive_warnings += 1;
+                // if available_mb < critical_threshold_mb {
+                //     consecutive_warnings += 1;
                     
-                    #[cfg(target_os = "macos")]
-                    eprintln!("🟡 WARNING {}: Only {}MB available ({}MB RAM + {}MB swap, critical threshold: {}MB)", 
-                        consecutive_warnings, available_mb, free_mb, free_swap_mb, critical_threshold_mb);
+                //     #[cfg(target_os = "macos")]
+                //     eprintln!("🟡 WARNING {}: Only {}MB available ({}MB RAM + {}MB swap, critical threshold: {}MB)", 
+                //         consecutive_warnings, available_mb, free_mb, free_swap_mb, critical_threshold_mb);
                     
-                    #[cfg(not(target_os = "macos"))]
-                    eprintln!("🟡 WARNING {}: Only {}MB free in system (critical threshold: {}MB)", 
-                        consecutive_warnings, available_mb, critical_threshold_mb);
+                //     #[cfg(not(target_os = "macos"))]
+                //     eprintln!("🟡 WARNING {}: Only {}MB free in system (critical threshold: {}MB)", 
+                //         consecutive_warnings, available_mb, critical_threshold_mb);
                     
-                    if consecutive_warnings >= 5 {
-                        eprintln!("🔴 CRITICAL: System memory critically low");
-                        eprintln!("🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH");
-                        std::process::exit(137);
-                    }
-                } else {
-                    consecutive_warnings = 0;
-                }
+                //     if consecutive_warnings >= 5 {
+                //         eprintln!("🔴 CRITICAL: System memory critically low");
+                //         eprintln!("🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH");
+                //         std::process::exit(137);
+                //     }
+                // } else {
+                //     consecutive_warnings = 0;
+                // }
                 
                 // Log periódico a cada ~500MB
-                if process_mb > 0 && process_mb % 500 < 50 {
-                    #[cfg(target_os = "macos")]
-                    println!("📊 Memory: Process={}MB, Available={}MB (RAM: {}MB + Swap: {}MB), Total={}MB", 
-                        process_mb, available_mb, free_mb, free_swap_mb, total_mb);
+                // if process_mb > 0 && process_mb % 500 < 50 {
+                //     #[cfg(target_os = "macos")]
+                //     println!("📊 Memory: Process={}MB, Available={}MB (RAM: {}MB + Swap: {}MB), Total={}MB", 
+                //         process_mb, available_mb, free_mb, free_swap_mb, total_mb);
                     
-                    #[cfg(not(target_os = "macos"))]
-                    println!("📊 Memory: Process={}MB, Free={}MB, Total={}MB", 
-                        process_mb, available_mb, total_mb);
-                }
+                //     #[cfg(not(target_os = "macos"))]
+                //     println!("📊 Memory: Process={}MB, Free={}MB, Total={}MB", 
+                //         process_mb, available_mb, total_mb);
+                // }
+                
+                std::thread::sleep(Duration::from_millis(100));
             }
         });
         
@@ -371,12 +387,13 @@ impl FileUtil {
 
 // ==================== logger.rs ====================
 
+#[derive(Clone)]
 pub struct Logger {
     level: LogLevel,
     configuration: RunConfiguration,
     global_log_filename: String,
-    bw_global: Option<BufWriter<File>>,
-    bw_local: Option<BufWriter<File>>,
+    bw_global: Arc<Mutex<Option<BufWriter<File>>>>,
+    bw_local: Arc<Mutex<Option<BufWriter<File>>>>,
     contract_name: String,
 }
 
@@ -404,13 +421,13 @@ impl Logger {
             level: configuration.log_level(),
             configuration: configuration.clone(),
             global_log_filename,
-            bw_global: Some(BufWriter::new(global_file)),
-            bw_local: Some(BufWriter::new(local_file)),
+            bw_global: Arc::new(Mutex::new(Some(BufWriter::new(global_file)))),
+            bw_local: Arc::new(Mutex::new(Some(BufWriter::new(local_file)))),
             contract_name,
         })
     }
 
-    pub fn log(&mut self, log_type: LogType, text: &str) {
+    pub fn log(&self, log_type: LogType, text: &str) {
         let date_info = self.get_date_info();
         let formatted_text = self.format(text);
 
@@ -441,23 +458,27 @@ impl Logger {
         }
     }
 
-    fn write_global(&mut self, line: &str) {
-        if let Some(ref mut writer) = self.bw_global {
-            if writeln!(writer, "{}", line).is_err() {
-                eprintln!("Failed to write to global log file: {}", self.global_log_filename);
-                println!("{}", line);
+    fn write_global(&self, line: &str) {
+        if let Ok(mut lock) = self.bw_global.lock() {
+            if let Some(ref mut writer) = *lock {
+                if writeln!(writer, "{}", line).is_err() {
+                    eprintln!("Failed to write to global log file: {}", self.global_log_filename);
+                    println!("{}", line);
+                }
+                let _ = writer.flush();
             }
-            let _ = writer.flush();
         }
     }
 
-    fn write_local(&mut self, line: &str) {
-        if let Some(ref mut writer) = self.bw_local {
-            if writeln!(writer, "{}", line).is_err() {
-                eprintln!("Failed to write to local log file: {}", self.configuration.result_file_name());
-                println!("{}", line);
+    fn write_local(&self, line: &str) {
+        if let Ok(mut lock) = self.bw_local.lock() {
+            if let Some(ref mut writer) = *lock {
+                if writeln!(writer, "{}", line).is_err() {
+                    eprintln!("Failed to write to local log file: {}", self.configuration.result_file_name());
+                    println!("{}", line);
+                }
+                let _ = writer.flush();
             }
-            let _ = writer.flush();
         }
     }
 
@@ -470,21 +491,19 @@ impl Logger {
         re.replace_all(text, "").to_string()
     }
 
-    pub fn close(&mut self) -> std::io::Result<()> {
-        if let Some(mut writer) = self.bw_global.take() {
-            writer.flush()?;
-        }
-        if let Some(mut writer) = self.bw_local.take() {
-            writer.flush()?;
-        }
-        Ok(())
-    }
-}
-
-impl Drop for Logger {
-    fn drop(&mut self) {
-        let _ = self.close();
-    }
+    // pub fn close(&self) -> std::io::Result<()> {
+    //     if let Ok(mut lock) = self.bw_global.lock() {
+    //         if let Some(mut writer) = lock.take() {
+    //             writer.flush()?;
+    //         }
+    //     }
+    //     if let Ok(mut lock) = self.bw_local.lock() {
+    //         if let Some(mut writer) = lock.take() {
+    //             writer.flush()?;
+    //         }
+    //     }
+    //     Ok(())
+    // }
 }
 
 // ==================== contract_util.rs ====================
@@ -548,11 +567,30 @@ impl ContractUtil {
     ) -> CompressedConcurrentActions {
         let current_time = std::time::Instant::now();
         
+        let n = relativized_actions.len();
+
+        if n > 30 {
+            let msg = format!("CRITICAL: Can't calculate the set of concurrent relativized actions. (Number of actions {}). Maximum supported is 30.", n);
+            logger.log(LogType::Necessary, &msg);
+            panic!("{}", msg);
+        }
+
+        // Pre-allocation check: use try_reserve on a temporary Vec to see if the OS allows this memory.
+        // This triggers a catchable panic instead of a hard process abort (OOM).
+        let size: u64 = 1u64 << n; // 2^n
+        let mut check_vec: Vec<u32> = Vec::new();
+        if let Err(_) = check_vec.try_reserve(size as usize) {
+            let bytes = size * 4;
+            let gb = bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+            let msg = format!("CRITICAL: Memory allocation of approx {:.2} GB failed for {} concurrent action combinations.", gb, size);
+            logger.log(LogType::Necessary, &msg);
+            panic!("{}", msg);
+        }
+
         let src: Vec<Arc<RelativizedAction>> = relativized_actions.into_iter().collect();
         let src_arc = Arc::new(src);
-        let n = src_arc.len();
 
-        let size: u64 = 1 << n; // 2^n
+        let size: u64 = 1u64 << n; // 2^n
 
         let mut valid_masks: Vec<u32> = (0..size)
             .into_par_iter()
@@ -578,9 +616,20 @@ impl ContractUtil {
         
         valid_masks.sort_by(|a, b| b.count_ones().cmp(&a.count_ones()));
 
+        // Check memory usage
+        let mut sys = System::new_all();
+        sys.refresh_all();
+        let pid = sysinfo::get_current_pid().unwrap();
+        let process_mb = if let Some(process) = sys.process(pid) {
+            process.memory() / 1024 / 1024
+        } else {
+            0
+        };
+
         let elapsed = current_time.elapsed();
-        logger.log(LogType::Necessary, &format!("Calculated {} concurrent actions in {:?}", 
-                valid_masks.len(), elapsed));
+
+        logger.log(LogType::Necessary, &format!("Calculated {} concurrent actions in {:?} (Memory: {}MB)", 
+                valid_masks.len(), elapsed, process_mb));
 
         CompressedConcurrentActions {
             source_map: src_arc,

@@ -46,6 +46,14 @@ impl DeonticClauseType {
             DeonticClauseType::Prohibition => "PROHIBITION",
         }
     }
+
+    pub fn short_symbol(&self) -> &str {
+        match self {
+            DeonticClauseType::Obligation => "O",
+            DeonticClauseType::Permission => "P",
+            DeonticClauseType::Prohibition => "F",
+        }
+    }
 }
 
 impl fmt::Display for DeonticClauseType {

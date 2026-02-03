@@ -24,11 +24,17 @@ use parser::{
 use std::time::Instant;
 use std::path::Path;
 use std::fs;
+use std::sync::atomic::Ordering;
 
 fn main() {
+    // ThreadPoolBuilder::new()
+    //     .num_threads(5)
+    //     .build_global()
+    //     .unwrap();
+
     let args: Vec<String> = std::env::args().collect();
     let config = parse_command_line(&args);
-    let mut logger = match Logger::new(config.clone()) {
+    let logger = match Logger::new(config.clone()) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("Failed to initialize logger: {}", e);
@@ -36,46 +42,90 @@ fn main() {
         }
     };
 
-
     if config.is_test() {
-        let total_ram_mb = get_system_total_memory_mb();
-        let max_process_mb = calculate_safe_memory_limit(total_ram_mb);
-        
-        let memory_guard = MemoryGuard::new(max_process_mb);
-        let _guard_handle = memory_guard.start_monitoring();
-        
-        logger.log(LogType::Additional, "Memory guard active:");
-        logger.log(LogType::Additional, &format!("   - System RAM: {}MB", total_ram_mb));
-        logger.log(LogType::Additional, &format!("   - Process limit: {}MB ({:.0}% of total)", 
-                    max_process_mb,
-                    (max_process_mb as f64 / total_ram_mb as f64) * 100.0));
+        // Custom panic hook to silence "CRITICAL:" panics only during tests
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let payload = info.payload();
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                Some((*s).to_string())
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                Some(s.clone())
+            } else {
+                None
+            };
 
-        // ThreadPoolBuilder::new()
-        // .num_threads(5)
-        // .build_global()
-        // .unwrap();
-
-        logger.log(LogType::Additional, &format!("Using {:?}", config));
-        logger.log(
-            LogType::Minimal,
-            &format!("Analysing contract in {}", config.contract_file_name()),
-        );
-    }
-    
-    match run_analysis(config, &mut logger) {
-        Ok(_) => {
-            logger.log(LogType::Minimal, "Analysis completed successfully");
-        }
-        Err(e) => {
-            logger.log(LogType::Minimal, "A fatal error occurred");
-            logger.log(LogType::Necessary, &format!("Error: {:?}", e));
-            
-            if e.to_string().contains("parse") || e.to_string().contains("syntax") {
-                logger.log(
-                    LogType::Minimal,
-                    "Malformed Contract, please check the syntax.",
-                );
+            if let Some(m) = msg {
+                if m.starts_with("CRITICAL:") {
+                    return;
+                }
             }
+            default_hook(info);
+        }));
+
+        if let Err(e) = run_tests() {
+            println!(";;;;;;;;;{}", e);
+        }
+        return;
+    }
+
+    let total_ram_mb = get_system_total_memory_mb();
+    let max_process_mb = calculate_safe_memory_limit(total_ram_mb);
+    
+    let memory_guard = MemoryGuard::new(max_process_mb, logger.clone());
+    let _guard_handle = memory_guard.start_monitoring();
+    
+    logger.log(LogType::Additional, "Memory guard active:");
+    logger.log(LogType::Additional, &format!("   - System RAM: {}MB", total_ram_mb));
+    logger.log(LogType::Additional, &format!("   - Process limit: {}MB ({:.0}% of total)", 
+                max_process_mb,
+                (max_process_mb as f64 / total_ram_mb as f64) * 100.0));
+
+    logger.log(LogType::Additional, &format!("Using {:?}", config));
+    logger.log(
+        LogType::Minimal,
+        &format!("Analysing contract in {}", config.contract_file_name()),
+    );
+
+    let start = Instant::now();
+    
+    let analysis_logger = logger.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut local_logger = analysis_logger;
+        run_analysis(config, &mut local_logger)
+    }));
+
+    match result {
+        Ok(analysis_result) => {
+            match analysis_result {
+                Ok(_) => {
+                    logger.log(LogType::Minimal, "Analysis completed successfully");
+                }
+                Err(e) => {
+                    logger.log(LogType::Minimal, "A fatal error occurred");
+                    logger.log(LogType::Necessary, &format!("Error: {:?}", e));
+                    
+                    if e.to_string().contains("parse") || e.to_string().contains("syntax") {
+                        logger.log(
+                            LogType::Minimal,
+                            "Malformed Contract, please check the syntax.",
+                        );
+                    }
+                }
+            }
+        }
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                format!("{}", s)
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                format!("{}", s)
+            } else {
+                String::from("Unknown panic payload")
+            };
+
+            let panic_msg = format!("🔴 CRITICAL UNHANDLED EXCEPTION (PANIC) CAUGHT IN MAIN: {} (execution time: {}ms)", msg, start.elapsed().as_millis() as u64);
+            eprintln!("\n{}", panic_msg);
+            logger.log(LogType::Necessary, &panic_msg);
         }
     }
 }
@@ -397,6 +447,112 @@ fn parse_command_line(args: &[String]) -> RunConfiguration {
     }
     
     config
+}
+
+fn get_automaton_data(time: u64, memory: u64, automaton: &Automaton, contract: &Contract) -> String {
+    let automaton_size_mb = estimate_automaton_size(automaton) as f64 / (1024.0 * 1024.0);
+    
+    format!(
+        "{};{};{};{};{};{};{};{:.2};{:.2};success",
+        time,
+        automaton.states.len(),
+        automaton.transitions.len(),
+        contract.individuals.len(),
+        contract.actions.len(),
+        if automaton.conflict_found { 1 } else { 0 },
+        automaton.get_conflicts().len(),
+        automaton_size_mb,
+        memory as f64
+    )
+}
+
+/// Estimativa aproximada do tamanho do autômato em bytes (deep size)
+fn estimate_automaton_size(automaton: &Automaton) -> usize {
+    let mut total = std::mem::size_of_val(automaton);
+    
+    // Estados (Heap)
+    // FxHashSet overhead é aprox 1.1 * capacity * size_of
+    let states_capacity = automaton.states.capacity();
+    total += states_capacity * (std::mem::size_of::<State>() + 16);
+    
+    for state in &automaton.states {
+        // Trace Vec
+        total += state.trace.capacity() * std::mem::size_of::<usize>();
+    }
+    
+    // Transições (Heap)
+    let transitions_capacity = automaton.transitions.capacity();
+    total += transitions_capacity * (std::mem::size_of::<Transition>() + 16);
+    
+    // Note: source_map dentro da Transição é um Arc, 
+    // então o conteúdo real já está sendo monitorado pelo MemoryGuard global
+    // ou contado uma vez se formos rigorosos, mas aqui estimamos o tamanho do grafo.
+    
+    // Mapa de Cláusula -> ID
+    let map_capacity = automaton.state_map.capacity();
+    total += map_capacity * (std::mem::size_of::<Clause>() + std::mem::size_of::<usize>() + 16);
+    
+    total
+}
+
+fn run_tests() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    let config = parse_command_line(&args);
+    let logger = match Logger::new(config.clone()) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Failed to initialize logger: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let total_ram_mb = get_system_total_memory_mb();
+    let max_process_mb = calculate_safe_memory_limit(total_ram_mb);
+    
+    let memory_guard = MemoryGuard::new(max_process_mb, logger.clone());
+    let _guard_handle = memory_guard.start_monitoring();
+    
+    let analysis_logger = logger.clone();
+    let input_string = fs::read_to_string(config.contract_file_name())
+        .map_err(|e| format!("Erro ao ler o ficheiro: {}", e))?;
+
+    let mut pairs = RCLParser::parse(Rule::main, &input_string)
+        .map_err(|e| format!("Erro de sintaxe: \n{}", e))?;
+
+    let main_pair = pairs.next().unwrap();
+    
+    // Carrega o contrato
+    let contract: Contract = build_ast(main_pair)
+        .map_err(|e| format!("Erro ao construir AST: \n{}", e))?;
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut local_logger = analysis_logger;
+        let start = Instant::now();
+        let mut constructor = AutomataConstructor::new(config.clone());
+        let automaton = constructor.process(contract.clone(), &mut local_logger);
+        let elapsed = start.elapsed();
+        
+        let memory = memory_guard.max_used.load(Ordering::Relaxed);
+        let data = get_automaton_data(elapsed.as_millis() as u64, memory, &automaton, &contract);
+        println!("{}", data);
+    }));
+
+    match result {
+        Ok(_) => {}
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                format!("{}", s)
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                format!("{}", s)
+            } else {
+                String::from("Unknown panic payload")
+            };
+            // Aligned with 12 columns total (1 from script + 11 from tool)
+            println!(";;;;;;;;;{}", msg);
+        }
+    }
+
+    Ok(())
 }
 
 /// Imprime informações de uso
