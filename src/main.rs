@@ -92,7 +92,7 @@ fn main() {
     let analysis_logger = logger.clone();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut local_logger = analysis_logger;
-        run_analysis(config, &mut local_logger)
+        run_analysis(config, &mut local_logger, &memory_guard)
     }));
 
     match result {
@@ -163,6 +163,7 @@ fn calculate_safe_memory_limit(total_ram_mb: u64) -> u64 {
 fn run_analysis(
     config: RunConfiguration,
     logger: &mut Logger,
+    memory_guard: &MemoryGuard,
 ) -> Result<(), Box<dyn std::error::Error>> {
 
     let input_string = fs::read_to_string(config.contract_file_name())
@@ -195,7 +196,7 @@ fn run_analysis(
     let elapsed = start.elapsed();
 
     // Imprime resultado
-    let result = print_result(&automaton, elapsed.as_millis() as u64);
+    let result = print_result(&automaton, elapsed.as_millis() as u64, memory_guard.max_used.load(Ordering::Relaxed));
     logger.log(LogType::Minimal, &result);
 
     // Exporta decomposições
@@ -326,11 +327,9 @@ fn print_trace(automaton: &Automaton) -> String {
     output
 }
 
-fn print_result(automaton: &Automaton, ms: u64) -> String {
+fn print_result(automaton: &Automaton, ms: u64, memory: u64) -> String {
     let mut output = String::new();
-    
-    output.push_str(&format!("Completed in {}ms\n", ms));
-    
+
     if automaton.conflict_found {
         output.push_str(&format!(
             "{}[CONFLICT] {}A conflict was found in the analyzed contract.{}\n",
@@ -347,6 +346,14 @@ fn print_result(automaton: &Automaton, ms: u64) -> String {
             ConsoleColors::RESET
         ));
     }
+
+
+    output.push_str("\n-------------------------------------------------------\n");
+    
+    output.push_str(&format!("Completed in {}ms\n", ms));
+    output.push_str(&format!("Max memory used: {}MB\n", memory));
+    
+    output.push_str("-------------------------------------------------------\n");
     
     output
 }

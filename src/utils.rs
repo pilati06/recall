@@ -74,7 +74,7 @@ impl MemoryGuard {
                     0
                 };
 
-                if process_mb > max_used_shared.load(Ordering::Relaxed) {                    
+                if process_mb > max_used_shared.load(Ordering::Relaxed) {
                     max_used_shared.store(process_mb, Ordering::Relaxed);
                 }
                 
