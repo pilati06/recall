@@ -518,6 +518,18 @@ fn run_tests() -> Result<(), Box<dyn std::error::Error>> {
     
     let memory_guard = MemoryGuard::new(max_process_mb, logger.clone());
     let _guard_handle = memory_guard.start_monitoring();
+
+    logger.log(LogType::Necessary, "Memory guard active:");
+    logger.log(LogType::Necessary, &format!("   - System RAM: {}MB", total_ram_mb));
+    logger.log(LogType::Necessary, &format!("   - Process limit: {}MB ({:.0}% of total)", 
+                max_process_mb,
+                (max_process_mb as f64 / total_ram_mb as f64) * 100.0));
+
+    logger.log(LogType::Necessary, &format!("Using {:?}", config));
+    logger.log(
+        LogType::Necessary,
+        &format!("Analysing contract in {}", config.contract_file_name()),
+    );
     
     let analysis_logger = logger.clone();
     let input_string = fs::read_to_string(config.contract_file_name())
@@ -532,12 +544,25 @@ fn run_tests() -> Result<(), Box<dyn std::error::Error>> {
     let contract: Contract = build_ast(main_pair)
         .map_err(|e| format!("Erro ao construir AST: \n{}", e))?;
 
+    logger.log(LogType::Necessary, &format!("Loaded Contract: {}", contract));
+
+    let symbol_table = SymbolTable::instance();
+    let table = symbol_table.lock().unwrap();
+
+    logger.log(LogType::Necessary, &format!("{}", *table));
+    drop(table); 
+
+    logger.log(LogType::Necessary, "Processing contract...");
+
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut local_logger = analysis_logger;
         let start = Instant::now();
         let mut constructor = AutomataConstructor::new(config.clone());
         let automaton = constructor.process(contract.clone(), &mut local_logger);
         let elapsed = start.elapsed();
+
+        let result = print_result(&automaton, elapsed.as_millis() as u64, memory_guard.max_used.load(Ordering::Relaxed));
+        logger.log(LogType::Necessary, &result);
         
         let memory = memory_guard.max_used.load(Ordering::Relaxed);
         let data = get_automaton_data(elapsed.as_millis() as u64, memory, &automaton, &contract);
@@ -545,7 +570,9 @@ fn run_tests() -> Result<(), Box<dyn std::error::Error>> {
     }));
 
     match result {
-        Ok(_) => {}
+        Ok(_) => {
+            logger.log(LogType::Necessary, "Analysis completed successfully");
+        }
         Err(payload) => {
             let msg = if let Some(s) = payload.downcast_ref::<&str>() {
                 format!("{}", s)
