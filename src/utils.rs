@@ -8,8 +8,61 @@ use rustc_hash::FxHashSet;
 use super::*;
 use rayon::prelude::*;
 use sysinfo::{System, Pid, ProcessesToUpdate};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+#[cfg(target_os = "macos")]
+mod macos_mem {
+    use std::ptr;
+    use libc::{c_int, c_void, size_t, proc_pidinfo};
+
+    const PROC_PID_RUSAGE: c_int = 11;
+    
+    #[repr(C)]
+    struct rusage_info_v4 {
+        ri_uuid: [u8; 16],
+        ri_user_time: u64,
+        ri_system_time: u64,
+        ri_pkg_idle_wkups: u64,
+        ri_interrupt_wkups: u64,
+        ri_pageins: u64,
+        ri_wired_size: u64,
+        ri_resident_size: u64,
+        ri_phys_footprint: u64,
+        ri_proc_start_abstime: u64,
+        ri_proc_exit_abstime: u64,
+        ri_child_user_time: u64,
+        ri_child_system_time: u64,
+        ri_child_pkg_idle_wkups: u64,
+        ri_child_interrupt_wkups: u64,
+        ri_child_pageins: u64,
+        ri_child_wired_size: u64,
+        ri_child_resident_size: u64,
+        ri_child_phys_footprint: u64,
+        ri_diskio_bytesread: u64,
+        ri_diskio_byteswritten: u64,
+    }
+
+    pub fn get_phys_footprint_mb() -> u64 {
+        let mut info = std::mem::MaybeUninit::<rusage_info_v4>::uninit();
+        unsafe {
+            let pid = libc::getpid();
+            let ret = proc_pidinfo(
+                pid,
+                PROC_PID_RUSAGE,
+                0,
+                info.as_mut_ptr() as *mut c_void,
+                std::mem::size_of::<rusage_info_v4>() as c_int,
+            );
+            if ret > 0 {
+                let info = info.assume_init();
+                info.ri_phys_footprint / 1024 / 1024
+            } else {
+                0
+            }
+        }
+    }
+}
 
 
 #[derive(Clone, Debug)]
@@ -23,7 +76,8 @@ pub struct CompressedConcurrentActions {
 pub struct MemoryGuard {
     max_usage_mb: u64,
     logger: Logger,
-    pub max_used: Arc<AtomicU64>,
+    pub max_rss_used: Arc<AtomicU64>,
+    pub max_total_used: Arc<AtomicU64>,
 }
 
 impl MemoryGuard {
@@ -31,7 +85,8 @@ impl MemoryGuard {
         Self {
             max_usage_mb,
             logger,
-            max_used: Arc::new(AtomicU64::new(0)),
+            max_rss_used: Arc::new(AtomicU64::new(0)),
+            max_total_used: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -39,7 +94,8 @@ impl MemoryGuard {
         let should_terminate = Arc::new(AtomicBool::new(false));
         let clone = should_terminate.clone();
         let max_usage = self.max_usage_mb;
-        let max_used_shared = self.max_used.clone();
+        let max_rss_shared = self.max_rss_used.clone();
+        let max_total_shared = self.max_total_used.clone();
         let logger = self.logger.clone();
         
         std::thread::spawn(move || {
@@ -68,27 +124,44 @@ impl MemoryGuard {
                 // let available_mb = free_mb;
                 
                 let current_pid = sysinfo::get_current_pid().unwrap();
-                let process_mb = if let Some(process) = sys.process(Pid::from_u32(current_pid.as_u32())) {
-                    process.memory() / 1024 / 1024
-                } else {
-                    0
-                };
-
-                if process_mb > max_used_shared.load(Ordering::Relaxed) {
-                    max_used_shared.store(process_mb, Ordering::Relaxed);
-                }
-                
-                // CRÍTICO: processo usando muita memória
-                if process_mb > max_usage {
-                    let msg = format!("🔴 CRITICAL: Process using {}MB (limit: {}MB)", process_mb, max_usage);
-                    eprintln!("{}", msg);
-                    logger.log(LogType::Necessary, &msg);
+                if let Some(process) = sys.process(Pid::from_u32(current_pid.as_u32())) {
+                    let rss_mb = process.memory() / 1024 / 1024;
                     
-                    let msg = "🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH";
-                    eprintln!("{}", msg);
-                    logger.log(LogType::Necessary, msg);
+                    // Definimos o 'total' de forma específica para cada plataforma
+                    let total_mb = if cfg!(target_os = "windows") {
+                        // No Windows, Virtual Memory é o "Commit Size" (muito informativo)
+                        process.virtual_memory() / 1024 / 1024
+                    } else if cfg!(target_os = "macos") {
+                        // No macOS, usamos o Physical Footprint via libc
+                        #[cfg(target_os = "macos")]
+                        { macos_mem::get_phys_footprint_mb() }
+                        #[cfg(not(target_os = "macos"))]
+                        { rss_mb } // Fallback para outros Unix
+                    } else {
+                        rss_mb
+                    };
 
-                    std::process::exit(137);
+                    if rss_mb > max_rss_shared.load(Ordering::Relaxed) {
+                        max_rss_shared.store(rss_mb, Ordering::Relaxed);
+                    }
+                    if total_mb > max_total_shared.load(Ordering::Relaxed) {
+                        max_total_shared.store(total_mb, Ordering::Relaxed);
+                    }
+                    
+                    // CRÍTICO: uso excessivo de memória
+                    if rss_mb > max_usage {
+                        let total_label = if cfg!(target_os = "windows") { "Virtual (Commit)" } else { "Footprint" };
+                        let msg = format!("🔴 CRITICAL: Memory usage exceeded! RAM: {}MB, {}: {}MB (Limit: {}MB)", 
+                            rss_mb, total_label, total_mb, max_usage);
+                        eprintln!("{}", msg);
+                        logger.log(LogType::Necessary, &msg);
+                        
+                        let msg = "🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH";
+                        eprintln!("{}", msg);
+                        logger.log(LogType::Necessary, msg);
+
+                        std::process::exit(137);
+                    }
                 }
                 
                 // CRÍTICO: sistema sem memória

@@ -196,7 +196,12 @@ fn run_analysis(
     let elapsed = start.elapsed();
 
     // Imprime resultado
-    let result = print_result(&automaton, elapsed.as_millis() as u64, memory_guard.max_used.load(Ordering::Relaxed));
+    let result = print_result(
+        &automaton, 
+        elapsed.as_millis() as u64, 
+        memory_guard.max_rss_used.load(Ordering::Relaxed),
+        memory_guard.max_total_used.load(Ordering::Relaxed)
+    );
     logger.log(LogType::Minimal, &result);
 
     // Exporta decomposições
@@ -327,7 +332,7 @@ fn print_trace(automaton: &Automaton) -> String {
     output
 }
 
-fn print_result(automaton: &Automaton, ms: u64, memory: u64) -> String {
+fn print_result(automaton: &Automaton, ms: u64, rss: u64, total: u64) -> String {
     let mut output = String::new();
 
     if automaton.conflict_found {
@@ -351,7 +356,8 @@ fn print_result(automaton: &Automaton, ms: u64, memory: u64) -> String {
     output.push_str("\n-------------------------------------------------------\n");
     
     output.push_str(&format!("Completed in {}ms\n", ms));
-    output.push_str(&format!("Max memory used: {}MB\n", memory));
+    output.push_str(&format!("Max RAM: {}MB\n", rss));
+    output.push_str(&format!("Max Total Memory: {}MB\n", total));
     
     output.push_str("-------------------------------------------------------\n");
     
@@ -550,7 +556,7 @@ fn run_tests() -> Result<(), Box<dyn std::error::Error>> {
     let table = symbol_table.lock().unwrap();
 
     logger.log(LogType::Necessary, &format!("{}", *table));
-    drop(table); 
+    drop(table);
 
     logger.log(LogType::Necessary, "Processing contract...");
 
@@ -561,11 +567,13 @@ fn run_tests() -> Result<(), Box<dyn std::error::Error>> {
         let automaton = constructor.process(contract.clone(), &mut local_logger);
         let elapsed = start.elapsed();
 
-        let result = print_result(&automaton, elapsed.as_millis() as u64, memory_guard.max_used.load(Ordering::Relaxed));
+        let rss = memory_guard.max_rss_used.load(Ordering::Relaxed);
+        let total = memory_guard.max_total_used.load(Ordering::Relaxed);
+
+        let result = print_result(&automaton, elapsed.as_millis() as u64, rss, total);
         logger.log(LogType::Necessary, &result);
         
-        let memory = memory_guard.max_used.load(Ordering::Relaxed);
-        let data = get_automaton_data(elapsed.as_millis() as u64, memory, &automaton, &contract);
+        let data = get_automaton_data(elapsed.as_millis() as u64, total, &automaton, &contract);
         println!("{}", data);
     }));
 
