@@ -16,7 +16,8 @@ mod macos_mem {
     use std::ptr;
     use libc::{c_int, c_void, size_t, proc_pidinfo};
 
-    const PROC_PID_RUSAGE: c_int = 11;
+    const PROC_PID_RUSAGE: c_int = 2;
+    const RUSAGE_INFO_V4: u64 = 4;
     
     #[repr(C)]
     struct rusage_info_v4 {
@@ -50,7 +51,7 @@ mod macos_mem {
             let ret = proc_pidinfo(
                 pid,
                 PROC_PID_RUSAGE,
-                0,
+                RUSAGE_INFO_V4,
                 info.as_mut_ptr() as *mut c_void,
                 std::mem::size_of::<rusage_info_v4>() as c_int,
             );

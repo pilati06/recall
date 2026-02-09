@@ -408,6 +408,7 @@ fn parse_command_line(args: &[String]) -> RunConfiguration {
                         config.set_continue_on_conflict(true);
                     }
                     'm' => {
+                        config.set_export_automaton(true);
                         config.set_export_min_automaton(true);
                     }
                     't' => {
@@ -444,6 +445,7 @@ fn parse_command_line(args: &[String]) -> RunConfiguration {
                 config.set_continue_on_conflict(true);
             }
             "-m" => {
+                config.set_export_automaton(true);
                 config.set_export_min_automaton(true);
             }
             "-t" => {
@@ -616,8 +618,8 @@ fn print_usage() {
     println!("        Analyzes a contract in the file 'contract.rcl'");
     println!("    recall contract.rcl -g");
     println!("        Analyzes the contract and writes automaton in a file\n");
-    println!("Please report issues to: della.mura@gmail.com");
-    println!("More information: http://recall.della-mura.com.br");
+    println!("Please report issues to: edson.luiz.pilati@uel.br / bonifacio@uel.br");
+    println!("More information: https://recall-site.github.io/");
 }
 
 // ==================== Módulo de Utilidades de Console ====================
