@@ -219,26 +219,30 @@ fn run_analysis(
 
     // Exporta autômato
     if config.is_export_automaton() {
-        logger.log(
-            LogType::Minimal,
-            &format!("Exporting Automaton to {}", config.automaton_file_name()),
-        );
 
         // Exporta versão minimizada se configurado
         if config.is_export_min_automaton() {
+            logger.log(
+                LogType::Minimal,
+                &format!("Exporting Automaton to {}", config.min_automaton_file_name()),
+            );
             let min_dot = AutomatonExporter::dump_to_min_dot(&automaton);
-            let min_filename = format!("{}_min", config.automaton_file_name());
+            let min_filename = format!("{}", config.min_automaton_file_name());
             FileUtil::write_to_file(&min_filename, &[&min_dot])?;
+        } else {
+            logger.log(
+                LogType::Minimal,
+                &format!("Exporting Automaton to {}", config.automaton_file_name()),
+            );
+            // Exporta versão completa
+            let dot = AutomatonExporter::dump_to_dot(&automaton);
+            FileUtil::write_to_file(config.automaton_file_name(), &[&dot])?;
+
+            // Exporta versão texto
+            let text = AutomatonExporter::dump_to_text(&automaton);
+            let text_filename = format!("{}.txt", config.automaton_file_name());
+            FileUtil::write_to_file(&text_filename, &[&text])?;
         }
-
-        // Exporta versão completa
-        let dot = AutomatonExporter::dump_to_dot(&automaton);
-        FileUtil::write_to_file(config.automaton_file_name(), &[&dot])?;
-
-        // Exporta versão texto
-        let text = AutomatonExporter::dump_to_text(&automaton);
-        let text_filename = format!("{}.txt", config.automaton_file_name());
-        FileUtil::write_to_file(&text_filename, &[&text])?;
     }
 
     std::thread::spawn(move || {
@@ -381,6 +385,7 @@ fn parse_command_line(args: &[String]) -> RunConfiguration {
     config.set_result_file_name(format!("{}.result", file_stem));
     config.set_global_log_filename(format!("{}.log", file_stem));
     config.set_automaton_file_name(format!("{}.dot", file_stem));
+    config.set_min_automaton_file_name(format!("{}_min.dot", file_stem));
     config.set_decompositions_file_name(format!("{}.csv", file_stem));
     
     let mut i = 2;

@@ -17,10 +17,10 @@ mod macos_mem {
     use libc::{c_int, c_void, size_t, proc_pidinfo};
 
     const PROC_PID_RUSAGE: c_int = 2;
-    const RUSAGE_INFO_V4: u64 = 4;
+    const RUSAGE_INFO_V2: u64 = 2;
     
     #[repr(C)]
-    struct rusage_info_v4 {
+    struct rusage_info_v2 {
         ri_uuid: [u8; 16],
         ri_user_time: u64,
         ri_system_time: u64,
@@ -37,23 +37,21 @@ mod macos_mem {
         ri_child_pkg_idle_wkups: u64,
         ri_child_interrupt_wkups: u64,
         ri_child_pageins: u64,
-        ri_child_wired_size: u64,
-        ri_child_resident_size: u64,
-        ri_child_phys_footprint: u64,
+        ri_child_elapsed_abstime: u64,
         ri_diskio_bytesread: u64,
         ri_diskio_byteswritten: u64,
     }
 
     pub fn get_phys_footprint_mb() -> u64 {
-        let mut info = std::mem::MaybeUninit::<rusage_info_v4>::uninit();
+        let mut info = std::mem::MaybeUninit::<rusage_info_v2>::uninit();
         unsafe {
             let pid = libc::getpid();
             let ret = proc_pidinfo(
                 pid,
                 PROC_PID_RUSAGE,
-                RUSAGE_INFO_V4,
+                RUSAGE_INFO_V2,
                 info.as_mut_ptr() as *mut c_void,
-                std::mem::size_of::<rusage_info_v4>() as c_int,
+                std::mem::size_of::<rusage_info_v2>() as c_int,
             );
             if ret > 0 {
                 let info = info.assume_init();
@@ -383,6 +381,7 @@ pub struct RunConfiguration {
     use_prunning: bool,
     decompositions_file_name: String,
     automaton_file_name: String,
+    min_automaton_file_name: String,
     log_level: LogLevel,
     global_log_filename: String,
     test: bool,
@@ -400,6 +399,7 @@ impl RunConfiguration {
             use_prunning: true,
             decompositions_file_name: String::new(),
             automaton_file_name: String::new(),
+            min_automaton_file_name: String::new(),
             log_level: LogLevel::Normal,
             global_log_filename: String::new(),
             test: false,
@@ -417,6 +417,7 @@ impl RunConfiguration {
     pub fn is_test(&self) -> bool { self.test }
     pub fn decompositions_file_name(&self) -> &str { &self.decompositions_file_name }
     pub fn automaton_file_name(&self) -> &str { &self.automaton_file_name }
+    pub fn min_automaton_file_name(&self) -> &str { &self.min_automaton_file_name }
     pub fn log_level(&self) -> LogLevel { self.log_level }
     pub fn global_log_filename(&self) -> &str { &self.global_log_filename }
 
@@ -431,6 +432,7 @@ impl RunConfiguration {
     pub fn set_log_level(&mut self, level: LogLevel) { self.log_level = level; }
     pub fn set_global_log_filename(&mut self, name: String) { self.global_log_filename = name; }
     pub fn set_automaton_file_name(&mut self, name: String) { self.automaton_file_name = name; }
+    pub fn set_min_automaton_file_name(&mut self, name: String) { self.min_automaton_file_name = name; }
     pub fn set_decompositions_file_name(&mut self, name: String) { self.decompositions_file_name = name; }
     pub fn set_test(&mut self, value: bool) { self.test = value; }
 }
