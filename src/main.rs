@@ -369,7 +369,7 @@ fn print_result(automaton: &Automaton, ms: u64, rss: u64, total: u64) -> String 
 }
 
 fn parse_command_line(args: &[String]) -> RunConfiguration {
-    if args.len() < 2 {
+    if args.len() < 2 || args[1].starts_with('-') {
         print_usage();
         std::process::exit(0);
     }
