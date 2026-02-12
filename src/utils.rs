@@ -14,9 +14,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
 mod macos_mem {
     use std::mem;
-    use libc::{c_int, mach_task_self, task_info, mach_msg_type_number_t, kern_return_t};
+    use libc::{c_int, mach_task_self, task_info, mach_msg_type_number_t, kern_return_t, task_flavor_t};
 
-    const TASK_VM_INFO: c_int = 22;
+    const TASK_VM_INFO: task_flavor_t = 22;
     const KERN_SUCCESS: kern_return_t = 0;
     
     #[repr(C)]
@@ -43,11 +43,16 @@ mod macos_mem {
          pub phys_footprint: u64,
          min_address: u64,
          max_address: u64,
-         _padding: [u64; 10],
+         // Depending on SDK version, there might be more fields.
+         // We rely on the kernel filling what it knows and the count being passed correctly.
+         // To be safe, we can add some padding, but standard practice is often just checking count.
+         // Here we assume standard layout.
+         _padding: [u64; 10], // Padding for future fields just in case
     }
 
     pub fn get_phys_footprint_mb() -> u64 {
         unsafe {
+            #[allow(deprecated)]
             let task = mach_task_self();
             let mut info: task_vm_info_data_t = mem::zeroed();
             let mut count = (mem::size_of::<task_vm_info_data_t>() / mem::size_of::<i32>()) as mach_msg_type_number_t;
