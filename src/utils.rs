@@ -57,6 +57,7 @@ mod macos_mem {
                 let info = info.assume_init();
                 info.ri_phys_footprint / 1024 / 1024
             } else {
+                eprintln!("Failed to get phys footprint: {}", std::io::Error::last_os_error());
                 0
             }
         }
@@ -133,7 +134,10 @@ impl MemoryGuard {
                     } else if cfg!(target_os = "macos") {
                         // No macOS, usamos o Physical Footprint via libc
                         #[cfg(target_os = "macos")]
-                        { macos_mem::get_phys_footprint_mb() }
+                        { 
+                            let fp = macos_mem::get_phys_footprint_mb();
+                            if fp > 0 { fp } else { rss_mb }
+                        }
                         #[cfg(not(target_os = "macos"))]
                         { rss_mb } // Fallback para outros Unix
                     } else {
@@ -148,7 +152,7 @@ impl MemoryGuard {
                     }
                     
                     // CRÍTICO: uso excessivo de memória
-                    if rss_mb > max_usage {
+                    if total_mb > max_usage {
                         let total_label = if cfg!(target_os = "windows") { "Virtual (Commit)" } else { "Footprint" };
                         let msg = format!("🔴 CRITICAL: Memory usage exceeded! RAM: {}MB, {}: {}MB (Limit: {}MB)", 
                             rss_mb, total_label, total_mb, max_usage);
