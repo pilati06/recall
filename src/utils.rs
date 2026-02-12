@@ -13,51 +13,55 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 #[cfg(target_os = "macos")]
 mod macos_mem {
-    use std::ptr;
-    use libc::{c_int, c_void, size_t, proc_pidinfo};
+    use std::mem;
+    use libc::{c_int, mach_task_self, task_info, mach_msg_type_number_t, kern_return_t};
 
-    const PROC_PID_RUSAGE: c_int = 2;
-    const RUSAGE_INFO_V2: u64 = 2;
+    const TASK_VM_INFO: c_int = 22;
+    const KERN_SUCCESS: kern_return_t = 0;
     
     #[repr(C)]
-    struct rusage_info_v2 {
-        ri_uuid: [u8; 16],
-        ri_user_time: u64,
-        ri_system_time: u64,
-        ri_pkg_idle_wkups: u64,
-        ri_interrupt_wkups: u64,
-        ri_pageins: u64,
-        ri_wired_size: u64,
-        ri_resident_size: u64,
-        ri_phys_footprint: u64,
-        ri_proc_start_abstime: u64,
-        ri_proc_exit_abstime: u64,
-        ri_child_user_time: u64,
-        ri_child_system_time: u64,
-        ri_child_pkg_idle_wkups: u64,
-        ri_child_interrupt_wkups: u64,
-        ri_child_pageins: u64,
-        ri_child_elapsed_abstime: u64,
-        ri_diskio_bytesread: u64,
-        ri_diskio_byteswritten: u64,
+    #[derive(Default)]
+    struct task_vm_info_data_t {
+         virtual_size: u64,
+         integer_size: u64,
+         resident_size: u64,
+         resident_size_peak: u64,
+         device: u64,
+         device_peak: u64,
+         internal: u64,
+         internal_peak: u64,
+         external: u64,
+         external_peak: u64,
+         reusable: u64,
+         reusable_peak: u64,
+         purgeable_volatile_pmap: u64,
+         purgeable_volatile_resident: u64,
+         purgeable_volatile_virtual: u64,
+         compressed: u64,
+         compressed_peak: u64,
+         compressed_lifetime: u64,
+         pub phys_footprint: u64,
+         min_address: u64,
+         max_address: u64,
+         _padding: [u64; 10],
     }
 
     pub fn get_phys_footprint_mb() -> u64 {
-        let mut info = std::mem::MaybeUninit::<rusage_info_v2>::uninit();
         unsafe {
-            let pid = libc::getpid();
-            let ret = proc_pidinfo(
-                pid,
-                PROC_PID_RUSAGE,
-                RUSAGE_INFO_V2,
-                info.as_mut_ptr() as *mut c_void,
-                std::mem::size_of::<rusage_info_v2>() as c_int,
+            let task = mach_task_self();
+            let mut info: task_vm_info_data_t = mem::zeroed();
+            let mut count = (mem::size_of::<task_vm_info_data_t>() / mem::size_of::<i32>()) as mach_msg_type_number_t;
+            
+            let ret = task_info(
+                task,
+                TASK_VM_INFO,
+                &mut info as *mut task_vm_info_data_t as *mut i32,
+                &mut count
             );
-            if ret > 0 {
-                let info = info.assume_init();
-                info.ri_phys_footprint / 1024 / 1024
+            
+            if ret == KERN_SUCCESS {
+                info.phys_footprint / 1024 / 1024
             } else {
-                eprintln!("Failed to get phys footprint: {}", std::io::Error::last_os_error());
                 0
             }
         }
@@ -156,11 +160,11 @@ impl MemoryGuard {
                         let total_label = if cfg!(target_os = "windows") { "Virtual (Commit)" } else { "Footprint" };
                         let msg = format!("🔴 CRITICAL: Memory usage exceeded! RAM: {}MB, {}: {}MB (Limit: {}MB)", 
                             rss_mb, total_label, total_mb, max_usage);
-                        eprintln!("{}", msg);
+                        //eprintln!("{}", msg);
                         logger.log(LogType::Necessary, &msg);
                         
                         let msg = "🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH";
-                        eprintln!("{}", msg);
+                        //eprintln!("{}", msg);
                         logger.log(LogType::Necessary, msg);
 
                         std::process::exit(137);
