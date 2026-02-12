@@ -145,7 +145,11 @@ impl MemoryGuard {
                         #[cfg(target_os = "macos")]
                         { 
                             let fp = macos_mem::get_phys_footprint_mb();
-                            if fp > 0 { fp } else { rss_mb }
+                            if fp > 0 { 
+                                std::cmp::max(fp, rss_mb) 
+                            } else { 
+                                rss_mb 
+                            }
                         }
                         #[cfg(not(target_os = "macos"))]
                         { rss_mb } // Fallback para outros Unix

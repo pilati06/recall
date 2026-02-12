@@ -145,13 +145,13 @@ fn calculate_safe_memory_limit(total_ram_mb: u64) -> u64 {
         0.95
     } else if total_ram_mb >= 8 * 1024 {
         // 8-16GB: usar 90%
-        0.90
+        0.95
     } else if total_ram_mb >= 4 * 1024 {
         // 4-8GB: usar 85%
-        0.85
+        0.95
     } else {
         // <4GB: usar 80%
-        0.80
+        0.85
     };
     
     let limit = (total_ram_mb as f64 * percentage) as u64;
