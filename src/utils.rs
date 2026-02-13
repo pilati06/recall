@@ -87,6 +87,7 @@ pub struct MemoryGuard {
     logger: Logger,
     pub max_rss_used: Arc<AtomicU64>,
     pub max_total_used: Arc<AtomicU64>,
+    start_time: std::time::Instant,
 }
 
 impl MemoryGuard {
@@ -96,6 +97,7 @@ impl MemoryGuard {
             logger,
             max_rss_used: Arc::new(AtomicU64::new(0)),
             max_total_used: Arc::new(AtomicU64::new(0)),
+            start_time: std::time::Instant::now(),
         }
     }
 
@@ -106,6 +108,7 @@ impl MemoryGuard {
         let max_rss_shared = self.max_rss_used.clone();
         let max_total_shared = self.max_total_used.clone();
         let logger = self.logger.clone();
+        let start_time = self.start_time;
         
         std::thread::spawn(move || {
             let mut sys = System::new_all();
@@ -167,8 +170,9 @@ impl MemoryGuard {
                     // CRÍTICO: uso excessivo de memória
                     if total_mb > max_usage {
                         let total_label = if cfg!(target_os = "windows") { "Virtual (Commit)" } else { "Footprint" };
-                        let msg = format!("🔴 CRITICAL: Memory usage exceeded! RAM: {}MB, {}: {}MB (Limit: {}MB)", 
-                            rss_mb, total_label, total_mb, max_usage);
+                        let elapsed_ms = start_time.elapsed().as_millis();
+                        let msg = format!("🔴 CRITICAL: Memory usage exceeded! RAM: {}MB, {}: {}MB (Limit: {}MB) - Execution Time: {}ms", 
+                            rss_mb, total_label, total_mb, max_usage, elapsed_ms);
                         //eprintln!("{}", msg);
                         logger.log(LogType::Necessary, &msg);
                         
