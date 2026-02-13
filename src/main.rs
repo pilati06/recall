@@ -69,17 +69,18 @@ fn main() {
         return;
     }
 
-    let total_ram_mb = get_system_total_memory_mb();
-    let max_process_mb = calculate_safe_memory_limit(total_ram_mb);
+    let (total_ram_mb, total_swap_mb) = get_system_memory_info();
+    let max_process_mb = calculate_safe_memory_limit(total_ram_mb, total_swap_mb);
     
     let memory_guard = MemoryGuard::new(max_process_mb, logger.clone());
     let _guard_handle = memory_guard.start_monitoring();
     
     logger.log(LogType::Additional, "Memory guard active:");
     logger.log(LogType::Additional, &format!("   - System RAM: {}MB", total_ram_mb));
-    logger.log(LogType::Additional, &format!("   - Process limit: {}MB ({:.0}% of total)", 
+    logger.log(LogType::Additional, &format!("   - System Swap: {}MB", total_swap_mb));
+    logger.log(LogType::Additional, &format!("   - Process limit: {}MB ({:.0}% of Total RAM + Swap)", 
                 max_process_mb,
-                (max_process_mb as f64 / total_ram_mb as f64) * 100.0));
+                (max_process_mb as f64 / (total_ram_mb + total_swap_mb) as f64) * 100.0));
 
     logger.log(LogType::Additional, &format!("Using {:?}", config));
     logger.log(
@@ -130,34 +131,36 @@ fn main() {
     }
 }
 
-fn get_system_total_memory_mb() -> u64 {
+fn get_system_memory_info() -> (u64, u64) {
     use sysinfo::{System};
     
     let mut sys = System::new_all();
     sys.refresh_memory();
-    sys.total_memory() / 1024 / 1024
+    let ram = sys.total_memory() / 1024 / 1024;
+    let swap = sys.total_swap() / 1024 / 1024;
+    (ram, swap)
 }
 
-fn calculate_safe_memory_limit(total_ram_mb: u64) -> u64 {
-    // Estratégia adaptativa baseada na RAM total
-    let percentage = if total_ram_mb >= 16 * 1024 {
-        // 16GB+ : usar 95%
-        0.95
-    } else if total_ram_mb >= 8 * 1024 {
-        // 8-16GB: usar 90%
-        0.95
-    } else if total_ram_mb >= 4 * 1024 {
-        // 4-8GB: usar 85%
-        0.95
+fn calculate_safe_memory_limit(total_ram_mb: u64, total_swap_mb: u64) -> u64 {
+    // Estratégia adaptativa: usar RAM + Swap como base
+    let total_available = total_ram_mb + total_swap_mb;
+    
+    let percentage = if total_available >= 32 * 1024 {
+        0.95 // Sistemas grandes
+    } else if total_available >= 16 * 1024 {
+        0.90 
     } else {
-        // <4GB: usar 80%
-        0.85
+        0.85 
     };
     
-    let limit = (total_ram_mb as f64 * percentage) as u64;
+    let limit = (total_available as f64 * percentage) as u64;
     
-    // Garantir mínimo de 2GB e máximo razoável
-    limit.max(2048).min(total_ram_mb - 1024) // Deixar pelo menos 1GB pro SO
+    // Garantir que sobra algo para o SO (pelo menos 2GB de buffer se possível)
+    if total_available > 4096 {
+        limit.min(total_available - 2048)
+    } else {
+        limit.max(1024) // Fallback para sistemas muito pequenos
+    }
 }
 
 fn run_analysis(
@@ -526,17 +529,18 @@ fn run_tests() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let total_ram_mb = get_system_total_memory_mb();
-    let max_process_mb = calculate_safe_memory_limit(total_ram_mb);
+    let (total_ram_mb, total_swap_mb) = get_system_memory_info();
+    let max_process_mb = calculate_safe_memory_limit(total_ram_mb, total_swap_mb);
     
     let memory_guard = MemoryGuard::new(max_process_mb, logger.clone());
     let _guard_handle = memory_guard.start_monitoring();
 
     logger.log(LogType::Necessary, "Memory guard active:");
     logger.log(LogType::Necessary, &format!("   - System RAM: {}MB", total_ram_mb));
-    logger.log(LogType::Necessary, &format!("   - Process limit: {}MB ({:.0}% of total)", 
+    logger.log(LogType::Necessary, &format!("   - System Swap: {}MB", total_swap_mb));
+    logger.log(LogType::Necessary, &format!("   - Process limit: {}MB ({:.0}% of Total RAM + Swap)", 
                 max_process_mb,
-                (max_process_mb as f64 / total_ram_mb as f64) * 100.0));
+                (max_process_mb as f64 / (total_ram_mb + total_swap_mb) as f64) * 100.0));
 
     logger.log(LogType::Necessary, &format!("Using {:?}", config));
     logger.log(
