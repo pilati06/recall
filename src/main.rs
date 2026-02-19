@@ -342,6 +342,8 @@ fn print_trace(automaton: &Automaton) -> String {
 fn print_result(automaton: &Automaton, ms: u64, rss: u64, total: u64) -> String {
     let mut output = String::new();
 
+    output.push_str("\n-------------------------------------------------------\n\n");
+
     if automaton.conflict_found {
         output.push_str(&format!(
             "{}[CONFLICT] {}A conflict was found in the analyzed contract.{}\n",
@@ -358,7 +360,6 @@ fn print_result(automaton: &Automaton, ms: u64, rss: u64, total: u64) -> String 
             ConsoleColors::RESET
         ));
     }
-
 
     output.push_str("\n-------------------------------------------------------\n");
     

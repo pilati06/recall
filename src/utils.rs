@@ -169,7 +169,7 @@ impl MemoryGuard {
                     
                     // CRÍTICO: uso excessivo de memória
                     if total_mb > max_usage {
-                        let total_label = if cfg!(target_os = "windows") { "Virtual (Commit)" } else { "Footprint" };
+                        let total_label = "Total Memory";
                         let elapsed_ms = start_time.elapsed().as_millis();
                         let msg = format!("🔴 CRITICAL: Memory usage exceeded! RAM: {}MB, {}: {}MB (Limit: {}MB) - Execution Time: {}ms", 
                             rss_mb, total_label, total_mb, max_usage, elapsed_ms);
