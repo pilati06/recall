@@ -189,7 +189,7 @@ impl MemoryGuard {
                         summary.push_str("-------------------------------------------------------\n");
                         
                         if logger.configuration.is_test() {
-                            println!(";;;;;;;;;{}", msg);
+                            println!("{}", msg);
                         } else {
                             logger.log(LogType::Minimal, &summary);
                         }
