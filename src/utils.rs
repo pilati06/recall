@@ -167,18 +167,32 @@ impl MemoryGuard {
                         max_total_shared.store(total_mb, Ordering::Relaxed);
                     }
                     
-                    // CRÍTICO: uso excessivo de memória
                     if total_mb > max_usage {
                         let total_label = "Total Memory";
                         let elapsed_ms = start_time.elapsed().as_millis();
-                        let msg = format!("🔴 CRITICAL: Memory usage exceeded! RAM: {}MB, {}: {}MB (Limit: {}MB) - Execution Time: {}ms", 
+                        let msg = format!("CRITICAL: Memory usage exceeded! RAM: {}MB, {}: {}MB (Limit: {}MB) - Execution Time: {}ms", 
                             rss_mb, total_label, total_mb, max_usage, elapsed_ms);
-                        //eprintln!("{}", msg);
+                        
                         logger.log(LogType::Necessary, &msg);
                         
-                        let msg = "🔴 TERMINATING PROCESS TO PREVENT SYSTEM CRASH";
-                        //eprintln!("{}", msg);
-                        logger.log(LogType::Necessary, msg);
+                        let msg_term = "TERMINATING PROCESS TO PREVENT SYSTEM CRASH";
+                        logger.log(LogType::Necessary, msg_term);
+
+                        let rss_peak = max_rss_shared.load(Ordering::Relaxed);
+                        let total_peak = max_total_shared.load(Ordering::Relaxed);
+                        
+                        let mut summary = String::new();
+                        summary.push_str("\n-------------------------------------------------------\n");
+                        summary.push_str(&format!("Completed in {}ms\n", elapsed_ms));
+                        summary.push_str(&format!("Max RAM: {}MB\n", rss_peak));
+                        summary.push_str(&format!("Max Total Memory: {}MB\n", total_peak));
+                        summary.push_str("-------------------------------------------------------\n");
+                        
+                        if logger.configuration.is_test() {
+                            println!(";;;;;;;;;{}", msg);
+                        } else {
+                            logger.log(LogType::Minimal, &summary);
+                        }
 
                         std::process::exit(137);
                     }
